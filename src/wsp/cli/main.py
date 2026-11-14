@@ -238,5 +238,188 @@ def inspect_tensor(
     _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
 
 
+@app.command("record-trace")
+def record_trace(
+    ctx: typer.Context,
+    input_text: str = typer.Argument(..., help="Exact prompt text."),
+    output_text: str = typer.Option(..., "--output", help="Deterministic scripted response text."),
+    model_name: str = typer.Option("scripted/fixture", "--model"),
+    max_new_tokens: int = typer.Option(64, "--max-new-tokens"),
+    input_json: str | None = typer.Option(None, "--json", help="Full RecordTraceInput payload."),
+) -> None:
+    """Store a deterministic scripted trace without loading a model."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    if input_json:
+        payload = json.loads(input_json)
+    else:
+        payload = {
+            "input_text": input_text,
+            "params": {"max_new_tokens": max_new_tokens},
+            "backend": {
+                "kind": "scripted",
+                "scripted": {
+                    "model_name": model_name,
+                    "default_fixture": {"output_text": output_text, "termination": "eos"},
+                },
+            },
+        }
+    envelope = service.call("record_trace", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("traces")
+def list_traces(
+    ctx: typer.Context,
+    limit: int = typer.Option(50, "--limit"),
+) -> None:
+    """List stored behavioral traces."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    envelope = service.call("list_traces", {"limit": limit})
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("inspect-trace")
+def inspect_trace(
+    ctx: typer.Context,
+    trace_id: str = typer.Argument(...),
+    tokens: bool = typer.Option(True, "--tokens/--no-tokens"),
+    token_limit: int = typer.Option(64, "--token-limit"),
+    metadata: bool = typer.Option(False, "--metadata"),
+) -> None:
+    """Inspect one trace with explicit unavailable fields."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    envelope = service.call(
+        "inspect_trace",
+        {
+            "trace_id": trace_id,
+            "include_tokens": tokens,
+            "token_limit": token_limit,
+            "include_metadata": metadata,
+        },
+    )
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("scan-trace")
+def scan_trace(
+    ctx: typer.Context,
+    trace_id: str = typer.Argument(...),
+    detector: list[str] = typer.Option([], "--detector", help="Detector id; repeatable. Defaults to all enabled."),
+) -> None:
+    """Run deterministic behavioral detectors over a trace."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    payload = {
+        "trace_id": trace_id,
+        "detectors": [{"detector_id": item} for item in detector],
+    }
+    envelope = service.call("scan_trace", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("compare-traces")
+def compare_traces(
+    ctx: typer.Context,
+    left: str = typer.Argument(...),
+    right: str = typer.Argument(...),
+) -> None:
+    """Structurally compare two stored traces."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    envelope = service.call("compare_traces", {"left_trace_id": left, "right_trace_id": right})
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("contrast")
+def run_contrast(
+    ctx: typer.Context,
+    input_file: Path = typer.Option(..., "--input", "-i", help="RunContrastInput JSON file."),
+) -> None:
+    """Execute a paired comparison with a declared invariant."""
+    try:
+        payload = json.loads(input_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        typer.echo(json.dumps({"schema_version": "wsp.tool/1.0", "ok": False, "operation": "run_contrast", "error": {"code": "invalid_input", "message": str(exc), "details": {}}}, indent=2))
+        raise typer.Exit(1)
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    envelope = service.call("run_contrast", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("detectors")
+def list_detectors(ctx: typer.Context) -> None:
+    """Describe detector identifiers, parameters, and limitations."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    envelope = service.call("list_detectors", {})
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("evaluators")
+def list_evaluators(ctx: typer.Context) -> None:
+    """Describe evaluator identifiers and parameters."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    envelope = service.call("list_evaluators", {})
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("cases")
+def list_cases(
+    ctx: typer.Context,
+    status: str | None = typer.Option(None, "--status"),
+    tag: str | None = typer.Option(None, "--tag"),
+    limit: int = typer.Option(100, "--limit"),
+) -> None:
+    """List behavioral investigation cases."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    envelope = service.call(
+        "list_failure_cases", {"status": status, "tag": tag, "limit": limit}
+    )
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("inspect-case")
+def inspect_case(ctx: typer.Context, case_id: str = typer.Argument(...)) -> None:
+    """Load a case and its evidence references."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    envelope = service.call("inspect_failure_case", {"case_id": case_id})
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("export-case")
+def export_case(
+    ctx: typer.Context,
+    case_id: str = typer.Argument(...),
+    output: Path = typer.Option(..., "--output"),
+    include_traces: bool = typer.Option(True, "--traces/--no-traces"),
+    redact: bool = typer.Option(False, "--redact"),
+    overwrite: bool = typer.Option(False, "--overwrite"),
+) -> None:
+    """Write a self-contained case export bundle."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    envelope = service.call(
+        "export_failure_case",
+        {
+            "case_id": case_id,
+            "output_path": str(output),
+            "include_traces": include_traces,
+            "redact_text": redact,
+            "overwrite": overwrite,
+        },
+    )
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("import-case")
+def import_case(
+    ctx: typer.Context,
+    path: Path = typer.Argument(...),
+    overwrite: bool = typer.Option(False, "--overwrite"),
+) -> None:
+    """Reload a case export, verifying its checksums."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    envelope = service.call(
+        "import_failure_case", {"path": str(path), "overwrite": overwrite}
+    )
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()

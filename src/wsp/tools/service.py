@@ -513,6 +513,9 @@ class ToolService:
                 requires_workspace=True,
             )
         )
+        from wsp.tools.behavior_handlers import register_behavior_tools
+
+        register_behavior_tools(self)
 
     # ------------------------------------------------------------------- handlers
 
