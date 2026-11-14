@@ -29,7 +29,7 @@ from wsp.behavior.models import (
 )
 from wsp.behavior.trace import finalize_trace
 from wsp.core.budget import Budget
-from wsp.core.errors import InputError, NotFoundError, UnsupportedError
+from wsp.core.errors import InputError, NotFoundError, ResourceLimitError, UnsupportedError
 from wsp.core.hashing import sha256_file
 from wsp.core.time import utc_now_iso
 
@@ -55,11 +55,20 @@ def _content_text(value: Any) -> str | None:
     return None
 
 
-def load_inspect_log(path: str | Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def load_inspect_log(
+    path: str | Path,
+    *,
+    max_member_bytes: int = 64 * 1024 * 1024,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     source = Path(path).expanduser().resolve()
     if not source.exists() or not source.is_file():
         raise NotFoundError(f"Inspect log was not found: {source}")
     if source.suffix == ".json":
+        if source.stat().st_size > max_member_bytes:
+            raise ResourceLimitError(
+                "Inspect JSON log exceeds the configured import size limit",
+                details={"bytes": source.stat().st_size, "limit": max_member_bytes},
+            )
         try:
             payload = json.loads(source.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
@@ -82,6 +91,12 @@ def load_inspect_log(path: str | Path) -> tuple[dict[str, Any], list[dict[str, A
             raise InputError(f"could not read Inspect .eval archive: {exc}") from exc
         try:
             try:
+                header_info = archive.getinfo("header.json")
+                if header_info.file_size > max_member_bytes:
+                    raise ResourceLimitError(
+                        "Inspect .eval header exceeds the configured import size limit",
+                        details={"bytes": header_info.file_size, "limit": max_member_bytes},
+                    )
                 header = json.loads(archive.read("header.json"))
             except NotImplementedError as exc:
                 raise UnsupportedError(
@@ -98,6 +113,12 @@ def load_inspect_log(path: str | Path) -> tuple[dict[str, Any], list[dict[str, A
             )
             samples: list[dict[str, Any]] = []
             for name in names:
+                info = archive.getinfo(name)
+                if info.file_size > max_member_bytes:
+                    raise ResourceLimitError(
+                        "an Inspect .eval sample exceeds the configured import size limit",
+                        details={"member": name, "bytes": info.file_size, "limit": max_member_bytes},
+                    )
                 try:
                     sample = json.loads(archive.read(name))
                 except NotImplementedError as exc:
@@ -234,7 +255,7 @@ def import_inspect_log(
     sample_ids: list[str] | None = None,
 ) -> tuple[list[GenerationTrace], list[str]]:
     source = Path(path).expanduser().resolve()
-    header, samples = load_inspect_log(source)
+    header, samples = load_inspect_log(source, max_member_bytes=budget.max_trace_bytes)
     if len(samples) > budget.max_import_traces:
         raise InputError(
             "Inspect log contains more samples than the configured import limit",

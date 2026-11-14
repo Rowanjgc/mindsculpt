@@ -45,7 +45,7 @@ from wsp.behavior.models import (
 )
 from wsp.behavior.trace import TraceStore, finalize_trace
 from wsp.core.budget import Budget
-from wsp.core.errors import InputError, NotFoundError, UnsupportedError
+from wsp.core.errors import InputError, NotFoundError, ResourceLimitError, UnsupportedError
 from wsp.core.hashing import sha256_bytes, sha256_file
 from wsp.core.json import atomic_write_bytes, read_json
 from wsp.core.time import utc_now_iso
@@ -157,6 +157,13 @@ def import_trace(service: Any, request: ImportTraceInput, budget: Budget, run: A
     path = Path(request.path).expanduser().resolve()
     warnings: list[str] = []
     traces: list[GenerationTrace] = []
+    if request.format in {"wsp", "inif"} and path.exists():
+        limit = budget.max_trace_bytes if request.format == "wsp" else budget.max_artifact_bytes
+        if path.stat().st_size > limit:
+            raise ResourceLimitError(
+                "trace import file exceeds the configured size limit",
+                details={"bytes": path.stat().st_size, "limit": limit},
+            )
     if request.format == "wsp":
         if not path.exists() or not path.is_file():
             raise NotFoundError(f"trace file was not found: {path}")
