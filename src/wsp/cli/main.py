@@ -241,8 +241,8 @@ def inspect_tensor(
 @app.command("record-trace")
 def record_trace(
     ctx: typer.Context,
-    input_text: str = typer.Argument(..., help="Exact prompt text."),
-    output_text: str = typer.Option(..., "--output", help="Deterministic scripted response text."),
+    input_text: str | None = typer.Argument(None, help="Exact prompt text."),
+    output_text: str | None = typer.Option(None, "--output", help="Deterministic scripted response text."),
     model_name: str = typer.Option("scripted/fixture", "--model"),
     max_new_tokens: int = typer.Option(64, "--max-new-tokens"),
     input_json: str | None = typer.Option(None, "--json", help="Full RecordTraceInput payload."),
@@ -252,6 +252,8 @@ def record_trace(
     if input_json:
         payload = json.loads(input_json)
     else:
+        if input_text is None or output_text is None:
+            raise typer.BadParameter("provide INPUT_TEXT and --output, or --json")
         payload = {
             "input_text": input_text,
             "params": {"max_new_tokens": max_new_tokens},

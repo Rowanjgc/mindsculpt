@@ -284,7 +284,12 @@ class HuggingFaceBackend:
         encoded = self._render_prompt(tokenizer, request)
         if "input_ids" not in encoded:
             raise ExecutionError("tokenizer did not return input_ids")
-        input_ids = encoded["input_ids"].to(model.device)
+        device = model.device
+        encoded = {
+            key: value.to(device) if hasattr(value, "to") else value
+            for key, value in encoded.items()
+        }
+        input_ids = encoded["input_ids"]
         if input_ids.shape[1] > budget.max_trace_input_tokens:
             raise ResourceLimitError(
                 "prompt exceeds the configured input-token limit",

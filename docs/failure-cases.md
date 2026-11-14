@@ -164,6 +164,14 @@ human-authored titles, summaries, annotations, and hypotheses are **not**
 automatically redacted. Redacted traces cannot be checksum-verified against the
 original artifact; import accepts them as redacted evidence and reports it.
 
+Redacted exports also clear the case's local model path and reproduction
+environment. They do **not** rewrite embedded `contrast_results`, which contain
+the exact authored test inputs and observed output previews by design. Review
+or omit contrast evidence before sharing a bundle that contains sensitive
+prompts. Activation-capture payloads are likewise included as stored unless the
+caller exports with `include_traces=false` and manages those artifacts
+separately.
+
 ## Reload and portability
 
 - `include_traces=false` produces a smaller bundle that references traces rather

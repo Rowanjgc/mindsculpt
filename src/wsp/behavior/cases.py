@@ -211,6 +211,18 @@ def build_export(
         warnings.append(
             "case titles, summaries, annotations, and hypotheses are human-authored and were not redacted"
         )
+        warnings.append(
+            "case model/reproduction metadata is reduced, but embedded contrast results "
+            "retain their exact inputs and outputs; review them before sharing"
+        )
+
+    case_payload = case.model_dump(mode="json")
+    if redact_text:
+        if isinstance(case_payload.get("model"), dict):
+            case_payload["model"]["checkpoint_path"] = None
+        if isinstance(case_payload.get("reproduction"), dict):
+            case_payload["reproduction"]["environment"] = {}
+    exported_case_sha = sha256_bytes(canonical_bytes(case_payload))
 
     contrasts: list[dict[str, Any]] = []
     for reference in case.contrasts:
@@ -279,8 +291,8 @@ def build_export(
     bundle = {
         "schema_version": EXPORT_SCHEMA,
         "exported_at": utc_now_iso(),
-        "case_sha256": case_sha256(case),
-        "case": case.model_dump(mode="json"),
+        "case_sha256": exported_case_sha,
+        "case": case_payload,
         "traces": embedded_traces,
         "contrast_results": contrasts,
         "activation_captures": activation_payloads,
