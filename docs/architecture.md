@@ -28,10 +28,11 @@ in the domain modules.
 | `wsp.activations` | Bounded forward hooks, activation summaries, comparison, summary aggregation |
 | `wsp.patches` | Immutable patch model, operations, validation, patch sets, streamed export |
 | `wsp.execution` | Inference-mode forward passes, model loading, output comparison, offline demo models |
-| `wsp.workspace` | Local content-addressed artifacts, run records, experiments, patch storage |
+| `wsp.workspace` | Local content-addressed artifacts, run records, experiments, patch/trace/case storage |
+| `wsp.behavior` | Trace schema/storage, generation backends, detectors, evaluators, contrasts, failure cases |
 | `wsp.tools` | Pydantic tool schemas, operation registry, shared `ToolService` |
 | `wsp.cli` | Typer commands; every command prints the service’s JSON envelope |
-| `wsp.adapters` | Optional model-family adapters; V1 includes a local-only Hugging Face causal-LM adapter |
+| `wsp.adapters` | Optional model and format adapters: local Hugging Face, INIF 0.1, Inspect AI logs |
 
 ## Data flow
 
@@ -110,6 +111,41 @@ file is never opened for writing.
 Rollback is not an undo log: the source checkpoint was never changed, so
 reversion selects and verifies the immutable source identity.
 
+### Behavioral observation
+
+The Behavioral Observatory adds a data layer, not an inference engine:
+
+```text
+scripted backend ─┐
+local HF backend ─┼─> GenerationTrace ─> immutable artifact + trace index
+imported traces ──┘                          │
+                                             ├─> detectors ─> findings
+                                             ├─> comparison
+                                             └─> contrast ─> evaluation + traces
+                                                                 │
+                                            failure case <───────┘
+```
+
+A trace records the exact input, settings, token stream, termination, timing,
+provenance, privacy policy, and explicit unavailable fields. `finalize_trace`
+is the only place that applies privacy and fills checksums. Missing data is
+never guessed.
+
+Detectors are deterministic measurements. Each returns a `DetectorRun` with
+measurements and sparse findings; findings carry parameters, evidence ranges,
+severity/magnitude when meaningful, and limitations. A finding does not claim a
+cause. Detector failures are isolated to their run.
+
+Contrasts execute an authored baseline and variations with the same parameters
+and seed, store every trace, and evaluate a declared relationship. A baseline
+that does not establish the property makes the result inconclusive; a variation
+execution failure is recorded without aborting the other variations.
+
+Failure cases link traces, findings, contrast artifacts, evaluations,
+annotations, hypotheses, activation captures, and patch references. They can be
+exported as self-contained, checksum-verified bundles and reloaded into a fresh
+workspace.
+
 ## Storage formats
 
 All schemas are versioned and JSON-compatible.
@@ -131,6 +167,16 @@ All schemas are versioned and JSON-compatible.
 | `wsp.run/1.0` | Reproduction/run record |
 | `wsp.workspace/1.0` | Workspace configuration |
 | `wsp.experiment/1.0` | Named experiment grouping runs |
+| `wsp.trace/1.0` | One generation observation |
+| `wsp.trace-index/1.0` | Index entry pointing at an immutable trace artifact |
+| `wsp.finding/1.0` | One detector measurement/finding |
+| `wsp.scan/1.0` | Detector runs for one trace |
+| `wsp.evaluation/1.0` | Evaluator outcome, including uncertainty/abstention |
+| `wsp.contrast/1.0` | Authored paired comparison definition |
+| `wsp.contrast-result/1.0` | Executed comparison, outcomes, and evaluations |
+| `wsp.trace-comparison/1.0` | Structural trace comparison |
+| `wsp.case/1.0` | Persistent investigation case |
+| `wsp.case-export/1.0` | Self-contained case bundle |
 
 ### Workspace layout
 
@@ -145,7 +191,9 @@ All schemas are versioned and JSON-compatible.
 ├── patchsets/ps_<16-hex>.json
 ├── runs/run_<timestamp>_<8-hex>/run.json
 ├── models/<fingerprint-prefix>/manifest.json
-└── experiments/e_<16-hex>.json
+├── experiments/e_<16-hex>.json
+├── traces/tr_<16-hex>.json
+└── cases/case_<16-hex>/case.json
 ```
 
 Artifacts are addressed by SHA-256 of their bytes. The ID is stable for the
@@ -178,6 +226,15 @@ accepts overrides. Unknown budget keys are rejected rather than ignored.
 | `max_model_load_elements` | 50,000,000 | loading a checkpoint into a module |
 | `max_patch_payload_elements` | 1,000,000 | patch payloads |
 | `max_patchset_tensors` | 256 | patches per set |
+| `max_trace_tokens` | 20,000 | stored/generated token records |
+| `max_trace_input_tokens` | 8,192 | local-HF prompt length |
+| `max_trace_chars` | 2,000,000 | trace text and token text |
+| `max_trace_bytes` | 33,554,432 | one trace artifact |
+| `max_scan_tokens` | 200,000 | detector analysis units |
+| `max_scan_findings` | 200 | findings per scan |
+| `max_contrast_variants` | 16 | variations per contrast |
+| `max_case_traces` | 64 | trace references in a case |
+| `max_import_traces` | 64 | traces per imported document |
 | `max_output_bytes` | 2,000,000 | serialized tool envelopes |
 | `max_artifact_bytes` | 268,435,456 | one stored artifact |
 
@@ -216,5 +273,10 @@ Hugging Face adapter refuses remote downloads by default and sets
 - Keep patch representation separate from patch execution.
 - Keep execution separate from experiment bookkeeping.
 - Keep tool schemas independent of any LLM provider.
+- Keep observations, findings, evaluations, and interpretations separate.
+- Make missing measurements explicit; never fabricate token ids, log-probabilities,
+  timings, or termination reasons.
+- Keep third-party formats behind optional adapters; the canonical trace schema
+  is native and versioned.
 - Do not add abstraction layers without an immediate use.
 - Do not infer concepts from measurements; report measurements only.

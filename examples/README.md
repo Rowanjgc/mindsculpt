@@ -35,7 +35,28 @@ The source checkpoint’s SHA-256 is checked before and after. It is never
 modified. Re-running with `--force` is allowed; existing workspace records are
 treated idempotently when their semantic content is unchanged.
 
-## 3. Same patch through the CLI
+## 3. Behavior traces, detectors, contrast, and cases
+
+```bash
+python examples/behavioral_workflow.py
+```
+
+This creates a fresh temporary workspace under `examples/out/` and performs the
+V1.1 Behavioral Observatory workflow using synthetic scripted generations only:
+
+- records a healthy trace and a repetitive trace;
+- scans the repetitive trace for repeated n-grams and reconsideration markers;
+- compares the two traces structurally;
+- runs a contrastive test with an explicit factual invariant;
+- creates a case referencing a synthetic activation-capture artifact;
+- exports the case to a checksum-verified bundle;
+- reloads it into a fresh workspace and re-scans the restored trace.
+
+The script prints the finding kinds, contrast status, case id, and reload
+results. It is an infrastructure demonstration, not a scientific claim about a
+real model.
+
+## 4. Same patch through the CLI
 
 ```bash
 wsp --workspace examples/out/workspace call create_patch \

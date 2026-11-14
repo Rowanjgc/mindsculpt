@@ -1,8 +1,8 @@
 # Roadmap
 
-This roadmap separates what V1 actually contains from hypotheses about future
-work. Future items are not commitments and should not be implemented merely
-because they sound useful.
+This roadmap separates what the workbench actually contains from hypotheses
+about future work. Future items are not commitments and should not be
+implemented merely because they sound useful.
 
 ## Completed in V1
 
@@ -70,9 +70,35 @@ because they sound useful.
 - Offline examples for inspection, activation capture, patching, comparison,
   and rollback.
 
+## Completed in V1.1
+
+### Behavioral Observatory
+
+- Versioned `wsp.trace/1.0` schema with token-level observations, termination
+  reasons, timing, provenance, privacy policy, and explicit unavailable fields.
+- Immutable trace artifacts plus a local trace index.
+- Deterministic scripted generation backend and optional local Hugging Face
+  generation backend with token ids/log-probabilities when available.
+- Detector registry and five deterministic detectors: repetition, termination,
+  structured output, reconsideration markers, and repeated tool actions.
+- Sparse findings with evidence ranges, magnitude, parameters, and declared
+  limitations.
+- Evaluator abstraction with pass/fail/inconclusive/abstain/error outcomes,
+  reference answers, JSON contracts, and human judgements.
+- Contrastive tests with explicit invariants, exact authored inputs, stored
+  traces, and result artifacts.
+- Structural trace comparison.
+- Persistent failure-case registry with review states, annotations, hypotheses,
+  reproduction metadata, and references to existing activation/patch artifacts.
+- Self-contained, checksum-verified case export and reload.
+- INIF 0.1 and Inspect AI log adapters without adding them as core dependencies.
+- CLI and structured operations for the entire workflow, sharing the V1 service
+  layer.
+- Offline CPU tests and an end-to-end example with synthetic traces.
+
 ## Deliberately deferred
 
-These are **not** in V1:
+These are **not** in V1.1:
 
 - Autonomous research agents or LLM provider integration.
 - Automatic weight-edit discovery, gradient optimization, or fine-tuning.
@@ -85,6 +111,10 @@ These are **not** in V1:
 - Cached autoregressive generation tracing.
 - Pooled raw-activation aggregation.
 - Multi-patch edits to a single tensor inside one patch set.
+- Autonomous behavioral investigators or automatic causal localization.
+- LLM-based evaluators or hosted evaluation providers.
+- Automatic weight-patch discovery from behavioral findings.
+- A large defect taxonomy or benchmark leaderboard.
 
 ## Possible future work (hypotheses, not commitments)
 
@@ -116,6 +146,15 @@ Ordered roughly by how directly they extend existing primitives.
 10. **Deterministic execution profiles.** Record and compare backend settings
     (thread counts, deterministic algorithms) without promising cross-hardware
     bitwise identity.
+11. **Inspect AI execution adapter.** Run the same controlled comparison through
+    Inspect and import its logs, keeping the native service interfaces and case
+    store authoritative.
+12. **Generation-time activation capture.** Use a maintained instrumentation
+    backend for selected decode steps and reference those captures from traces.
+    The reviewed NNsight/nnterp pair is documented in
+    `docs/prior-art-and-integration.md`.
+13. **Case review workflow.** Add reviewer assignment, case linking, and a small
+    local review queue without turning the project into a dashboard.
 
 ## Research directions (outside the tool core)
 

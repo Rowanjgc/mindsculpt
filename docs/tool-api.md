@@ -109,6 +109,57 @@ Without `--workspace`, the service uses `$WSP_WORKSPACE` or `./.wsp` only when
 that directory already contains `workspace.json`. Commands that require a
 workspace return `invalid_input` otherwise.
 
+## Behavioral Observatory operations
+
+V1.1 adds operations for traces, detectors, contrasts, evaluations, and cases.
+They use the same envelope, error codes, budget overrides, and run records as V1.
+Full schemas are available from `wsp tools --operation <name>`.
+
+| Operation | Purpose |
+| --- | --- |
+| `record_trace` | Run one scripted or local-HF generation and store the trace |
+| `import_trace` | Import WSP JSON, INIF 0.1, or an Inspect AI log |
+| `inspect_trace` | Bounded token page and explicit provenance/privacy/unavailable fields |
+| `list_traces` | Trace index summaries |
+| `export_trace` | Export WSP or INIF JSON, optionally redacted |
+| `scan_trace` | Run deterministic detectors over one trace |
+| `list_detectors` | Detector registry, parameter schemas, limitations |
+| `compare_traces` | Structural comparison without judgement |
+| `run_contrast` | Execute a paired comparison with a declared invariant |
+| `evaluate_behavior` | Evaluate trace text or supplied text |
+| `list_evaluators` | Evaluator registry and parameter schemas |
+| `create_failure_case` | Validate references and persist a case |
+| `inspect_failure_case` | Load a case and checksum |
+| `list_failure_cases` | Filter cases by review status or tag |
+| `update_failure_case` | Update review state, annotations, hypotheses |
+| `export_failure_case` | Write a self-contained case bundle |
+| `import_failure_case` | Verify and reload a bundle |
+
+A scripted trace can be recorded directly from the CLI:
+
+```bash
+wsp init
+wsp record-trace "What is the capital of Australia?" \
+  --output "Canberra" --model scripted/fixture
+wsp scan-trace tr_0123456789abcdef --detector core.repetition
+wsp compare-traces tr_0123456789abcdef tr_fedcba9876543210
+wsp detectors
+wsp cases
+```
+
+Contrasts and full case payloads are multi-field inputs; use `wsp contrast
+--input contrast.json` or `wsp call run_contrast --json '...'`. The service
+validates the exact same schema either way.
+
+`record_trace`, `scan_trace`, `run_contrast`, and all case operations require a
+workspace. `import_trace` can validate without persisting with
+`{"persist": false}`. `evaluate_behavior` can evaluate an inline string without
+a workspace, but persisting the resulting artifact requires one.
+
+Inputs that are complex JSON documents use the behavior models in
+`wsp.behavior.models` and `wsp.tools.behavior_schemas`. Every operation rejects
+unknown fields.
+
 ## Common input types
 
 ### Selection

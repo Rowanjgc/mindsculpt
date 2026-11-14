@@ -1,6 +1,6 @@
 # Limitations and safety boundaries
 
-V1 is an instrument kit, not a complete research harness. The following limits
+V1.1 is an instrument kit, not a complete research harness. The following limits
 are intentional and should be visible in results rather than worked around
 silently.
 
@@ -137,13 +137,55 @@ silently.
 - The workbench reports measurements. It does not decide that a direction,
   neuron, or layer “means” something because a number changed.
 - There is no significance testing, causal claim generation, or automatic
-  circuit interpretation in V1.
+  circuit interpretation in V1.1.
 - There is no benchmark platform, leaderboard, or claim of improved model
   capability.
 - A patch that produces a measurable difference is not evidence that the edit
   is useful, safe, or semantically meaningful.
 
-## Known V1 gaps
+## Behavioral observation
+
+- V1.1 does not capture activations during cached autoregressive generation. A
+  trace can reference future activation-capture artifacts, but no generation-time
+  hook adapter is implemented.
+- The scripted backend is deterministic but synthetic. It validates detector and
+  evidence plumbing; it says nothing about a real model.
+- The local Hugging Face backend is optional and not exercised by the offline
+  test suite with a real checkpoint. Token log-probabilities depend on the
+  backend returning generation scores; when it does not, the field is explicitly
+  unavailable.
+- Detectors measure text/token patterns. They do not know whether a repeated
+  phrase is deliberate, quoted, formatted, or pathological. Severity is a
+  magnitude mapping, not a diagnosis.
+- The structured-output detector supports a deliberately small JSON contract:
+  required top-level keys and top-level primitive types. It is not a general
+  JSON Schema validator and is disabled by default because ordinary prose is not
+  a failed JSON contract.
+- Reconsideration-marker detection is literal and language-specific unless the
+  caller supplies markers. It undercounts paraphrases and can double-count
+  overlapping markers.
+- Tool-call grouping uses canonical arguments. Semantically equivalent calls
+  with different surface arguments are not grouped, and legitimate retries can
+  be reported as repeated actions.
+- Contrastive tests can only establish that authored pairs behaved as declared.
+  Changing a prompt does not prove that a semantic variable was isolated, and
+  the workbench does not assume paraphrases are equivalent.
+- A baseline that does not satisfy the declared property makes a contrast
+  inconclusive. A `fail` result means the declared relationship was violated,
+  not that the model is defective.
+- The reference-answer evaluator is string containment after normalization, not
+  semantic entailment. Human judgements are subjective and carry reviewer
+  metadata, but no automatic inter-rater reliability.
+- No LLM evaluator is included, and no hosted provider is required or contacted.
+- Failure-case export is self-contained for traces, contrast results, activation
+  artifacts, and patches, but the combined bundle is not split automatically and
+  can be large. Human-authored case text is not automatically redacted.
+- Traces store input/output text by default. Use `privacy.store_*` at collection
+  or `redact_text` at export. This is not encryption or access control.
+- Cases link evidence; they do not prove causation. Hypotheses remain
+  hypotheses.
+
+## Known V1.1 gaps
 
 - No MCP server is included. The JSON schemas and service layer are designed so
   a thin adapter can be added without changing core logic.

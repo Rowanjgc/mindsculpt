@@ -1,15 +1,15 @@
 # WSP Workbench
 
 An open-source, model-agnostic **Weight-Space Programming Workbench**: bounded
-instruments for inspecting, measuring, patching, executing, and reproducing work
-on neural-network weights.
+instruments for observing, inspecting, measuring, patching, executing, and
+reproducing work on neural-network weights and behavior.
 
-V1 is deliberately **tools first**. It is not an autonomous agent, a training
+V1.1 is deliberately **tools first**. It is not an autonomous agent, a training
 loop, a benchmark platform, or an interpreter for neurons. It provides reliable
 primitives that a person or a future tool-using agent can compose, with the same
 operations exposed through Python, a CLI, and JSON tool schemas.
 
-> **Status:** V1 complete. CPU-only, offline tests and examples. No LLM, cloud
+> **Status:** V1.1 complete. CPU-only, offline tests and examples. No LLM, cloud
 > service, API key, or network access is required.
 
 ## What V1 includes
@@ -31,6 +31,26 @@ operations exposed through Python, a CLI, and JSON tool schemas.
   grouping.
 - **Structured interfaces** — versioned JSON schemas and a shared service layer
   behind both the Python API and the `wsp` CLI.
+
+## What V1.1 adds: the Behavioral Observatory
+
+- **Generation traces** — a versioned `wsp.trace/1.0` record of tokens, text,
+  log-probabilities (when available), exact inputs, settings, termination,
+  timing, provenance, checksums, privacy state, and explicitly unavailable
+  fields.
+- **Collection** — a deterministic scripted backend and an optional local
+  Hugging Face backend; imports for WSP JSON, INIF 0.1, and Inspect AI logs.
+- **Detectors** — repetition, generation termination, structured output,
+  reconsideration markers, and repeated tool actions, with sparse findings,
+  evidence ranges, and declared limitations.
+- **Contrastive tests** — explicitly authored baseline/variation pairs with a
+  declared invariant, stored traces, and evaluator outcomes.
+- **Evaluation** — deterministic, reference-answer, JSON-contract, and human
+  judgement evaluators that distinguish pass, fail, inconclusive, abstention,
+  and error.
+- **Failure cases** — a local registry linking observations, controls, findings,
+  contrasts, evaluations, annotations, hypotheses, activation captures, and
+  patch references; self-contained export and checksum-verified reload.
 
 ## Install
 
@@ -74,6 +94,28 @@ python examples/inspect_and_patch.py
 8. stores the manifest, patch, patch set, and run metadata in a workspace.
 
 The source checkpoint hash is checked before and after. It never changes.
+
+### Behavioral workflow (offline)
+
+```bash
+python examples/behavioral_workflow.py
+```
+
+The example records synthetic healthy and repetitive traces, detects a
+repetition anomaly, compares the traces, runs a controlled comparison with an
+explicit factual invariant, stores a case, exports it, reloads it in a fresh
+workspace, and re-scans the restored trace. It is an infrastructure
+demonstration, not a scientific result.
+
+Minimal CLI version:
+
+```bash
+wsp init
+wsp record-trace "What is the capital of Australia?" --output "Canberra"
+wsp traces
+wsp scan-trace tr_... --detector core.repetition
+wsp detectors
+```
 
 ### CLI walkthrough
 
@@ -151,6 +193,14 @@ result = service.call("inspect_model", {"path": "examples/out/tiny_mlp.safetenso
 
 - [`docs/architecture.md`](docs/architecture.md) — layers, data flow, storage
   formats, budgets, precision, trust boundaries.
+- [`docs/behavioral-observatory.md`](docs/behavioral-observatory.md) — trace
+  lifecycle, detectors, evaluators, contrasts, cases, and limits.
+- [`docs/trace-format.md`](docs/trace-format.md) — the versioned trace schema,
+  provenance, privacy, and INIF/Inspect interoperability.
+- [`docs/failure-cases.md`](docs/failure-cases.md) — investigation cases,
+  review states, hypotheses, and export/reload bundles.
+- [`docs/prior-art-and-integration.md`](docs/prior-art-and-integration.md) —
+  evaluated upstream projects, tested versions, and integration decisions.
 - [`docs/tool-api.md`](docs/tool-api.md) — every structured operation, schemas,
   errors, limits, and examples.
 - [`docs/patch-format.md`](docs/patch-format.md) — the versioned patch format,
