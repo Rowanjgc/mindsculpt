@@ -40,6 +40,17 @@ class Budget(BaseModel):
     max_patch_payload_elements: int = Field(default=1_000_000, gt=0)
     max_patchset_tensors: int = Field(default=256, gt=0)
 
+    # Behavioral observation
+    max_trace_tokens: int = Field(default=20_000, gt=0)
+    max_trace_input_tokens: int = Field(default=8_192, gt=0)
+    max_trace_chars: int = Field(default=2_000_000, gt=0)
+    max_trace_bytes: int = Field(default=33_554_432, gt=0)
+    max_scan_tokens: int = Field(default=200_000, gt=0)
+    max_scan_findings: int = Field(default=200, gt=0)
+    max_contrast_variants: int = Field(default=16, gt=0)
+    max_case_traces: int = Field(default=64, gt=0)
+    max_import_traces: int = Field(default=64, gt=0)
+
     # Structured output
     max_output_bytes: int = Field(default=2_000_000, gt=0)
     max_artifact_bytes: int = Field(default=268_435_456, gt=0)

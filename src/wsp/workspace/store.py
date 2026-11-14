@@ -90,7 +90,7 @@ class Workspace:
         # The artifact store is anchored at the workspace root so that
         # ArtifactRef.path is workspace-relative (artifacts/<prefix>/<id>).
         self.artifacts = ArtifactStore(self.root, budget=self.budget)
-        for directory in ("patches", "patchsets", "runs", "models", "experiments"):
+        for directory in ("patches", "patchsets", "runs", "models", "experiments", "traces", "cases"):
             (self.root / directory).mkdir(parents=True, exist_ok=True)
 
     def _create(self, *, name: str | None) -> None:
@@ -109,7 +109,7 @@ class Workspace:
             created_at=utc_now_iso(),
         )
         atomic_write_json(self.config_path, config.model_dump(), overwrite=False)
-        for directory in ("artifacts", "patches", "patchsets", "runs", "models", "experiments"):
+        for directory in ("artifacts", "patches", "patchsets", "runs", "models", "experiments", "traces", "cases"):
             (self.root / directory).mkdir(parents=True, exist_ok=True)
 
     def _safe(self, *parts: str) -> Path:
@@ -317,4 +317,6 @@ class Workspace:
             "manifests": len(self.list_manifests()),
             "artifacts": len(self.artifacts.list()),
             "experiments": len(self.list_experiments()),
+            "traces": len(list((self.root / "traces").glob("tr_*.json"))),
+            "cases": len(list((self.root / "cases").glob("case_*/case.json"))),
         }
