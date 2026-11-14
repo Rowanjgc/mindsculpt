@@ -111,7 +111,7 @@ workspace return `invalid_input` otherwise.
 
 ## Behavioral Observatory operations
 
-V1.1 adds operations for traces, detectors, contrasts, evaluations, and cases.
+V1.1 added operations for traces, detectors, contrasts, evaluations, and cases.
 They use the same envelope, error codes, budget overrides, and run records as V1.
 Full schemas are available from `wsp tools --operation <name>`.
 
@@ -159,6 +159,97 @@ a workspace, but persisting the resulting artifact requires one.
 Inputs that are complex JSON documents use the behavior models in
 `wsp.behavior.models` and `wsp.tools.behavior_schemas`. Every operation rejects
 unknown fields.
+
+## Replay operations
+
+Replay resolves a recorded trace into an executable plan, then executes it. The
+two operations are separate on purpose: a plan is auditable before anything runs,
+and a plan artifact can be verified later without the trace.
+
+| Operation | Purpose |
+| --- | --- |
+| `prepare_replay` | Resolve the recorded token sequence and audit replayability |
+| `verify_replay` | Execute the teacher-forced forward pass and compare numbers |
+
+```bash
+wsp replay-plan tr_1f2e... --max-sequence-length 512
+wsp replay --plan a_9c31... --model '{"kind":"local_hf","path":"./ckpt"}'
+wsp replay tr_1f2e... --model '{"kind":"synthetic"}'
+```
+
+`prepare_replay` accepts `{trace_id, execution, tolerances, save, notes}`.
+`verify_replay` accepts `{trace_id | plan_artifact_id, model, execution,
+tolerances, include_per_token, save}` — exactly one of the first two.
+
+## Alignment operations
+
+| Operation | Purpose |
+| --- | --- |
+| `align_trace_tokens` | Map recorded tokens onto prompt/generation/full indices |
+| `resolve_finding_span` | Map detector evidence or a text span onto token positions |
+
+```bash
+wsp align tr_1f2e... --model '{"kind":"local_hf","path":"./ckpt"}'
+wsp resolve-span tr_1f2e... --kind token_range --role generation --start 0 --end 4
+wsp resolve-span tr_1f2e... --kind finding_evidence --detail '{"kind":"token_range","start":0,"end":4}'
+```
+
+`align_trace_tokens` accepts `{trace_id, model?, special_token_ids?,
+include_positions, position_offset, position_limit, save}`. `model` is optional;
+without it the alignment cannot supply tokenizer offsets or a special-token set,
+and says so. `resolve_finding_span` accepts `{trace_id, alignment_artifact_id?,
+model?, kind, start, end, role, name, detail, window, save}`.
+
+## Activation investigation operations
+
+| Operation | Purpose |
+| --- | --- |
+| `list_capture_points` | Addressable modules with architectural roles |
+| `capture_trace_activations` | Replay a trace and measure selected states |
+| `inspect_activation_capture` | Read a stored capture and its integrity |
+| `compare_activation_captures` | Numerically compare two captures |
+| `attach_investigation_evidence` | Record measurements as evidence, optionally on a case |
+| `inspect_investigation_evidence` | Read evidence and re-verify its references |
+
+```bash
+wsp capture-points --model '{"kind":"local_hf","path":"./ckpt"}' --kind block
+wsp capture tr_1f2e... --module blocks.1 --position 3 --mode selected --values
+wsp capture tr_1f2e... --module layers.11 --span a_abcd... --semantics predicting \
+    --instrumentation nnterp --model '{"kind":"local_hf","path":"./ckpt"}'
+wsp compare-captures a_1111... a_2222... --metric l2 --metric cosine --module blocks.1
+wsp attach-evidence --title "repetition finding" --case case_1a2b... \
+    --observation tr_1f2e... --capture a_1111... --comparison a_3333...
+wsp inspect-evidence a_4444...
+```
+
+`capture_trace_activations` takes exactly one position source: `positions`,
+`span_artifact_id`, or `role`/`role_start`/`role_end`. It also takes `mode`
+(`summary` or `selected`), `position_semantics` (`consuming` or `predicting`),
+`modules`, `instrumentation` (`torch_hooks` or `nnterp`), `include_inputs`,
+`first_call_only`, `execution`, and `tolerances`.
+
+`compare_activation_captures` takes two capture artifacts, optional `metrics`,
+`modules`, `direction` (required for `projection`), an `alignment` object, and
+`allow_different_models` (default `false`). Explicit alignments must set
+`reviewed: true`.
+
+## Privacy in exports
+
+`export_trace` and `export_failure_case` take an explicit policy:
+
+```json
+{
+  "mode": "redacted",
+  "sensitive_markers": ["CANARY-1234"],
+  "keep_token_ids": false,
+  "on_untransformable_artifact": "reject"
+}
+```
+
+`mode: "private"` (the default) keeps every artifact byte-identical.
+`mode: "redacted"` removes text at every serialization depth, rewrites artifact
+references and ids, drops retained activation vectors, and refuses the export if
+it cannot prove the result is clean. See `docs/failure-cases.md`.
 
 ## Common input types
 

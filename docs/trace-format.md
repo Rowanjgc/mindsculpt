@@ -1,6 +1,6 @@
 # Generation trace format
 
-Schema: `wsp.trace/1.0`
+Schema: `wsp.trace/1.1` (1.0 traces still validate)
 Canonical storage: content-addressed artifact, `kind="generation_trace"`
 Index: `wsp.trace-index/1.0` at `traces/<trace_id>.json`
 
@@ -11,7 +11,7 @@ what was not. It never fills a missing measurement with a guess.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `schema_version` | string | Always `wsp.trace/1.0` |
+| `schema_version` | string | `wsp.trace/1.1` for new traces; `wsp.trace/1.0` traces still validate |
 | `trace_id` | string | `tr_` + 16 lowercase hex characters |
 | `created_at` | ISO-8601 UTC | Observation time |
 | `checksums` | object | `output_sha256`, `tokens_sha256` when measurable |
@@ -215,7 +215,7 @@ Known mapping limits:
 - Export omits token arrays when any token id is missing, because INIF uses
   `id=None` to mean a sequence reference. The omission is reported in the
   document's export warnings; text and case evidence remain.
-- INIF is an evolving format. The native `wsp.trace/1.0` schema remains
+- INIF is an evolving format. The native `wsp.trace/1.1` schema remains
   canonical.
 
 ### Inspect AI logs
@@ -243,16 +243,22 @@ Known mapping limits:
 
 ## Future activation references
 
-`activation_captures` is a list of `ArtifactRef` records. V1.1 does not capture
-activations during cached generation, but traces and cases can reference future
-captures without a schema change. A future capture should preserve the same
-artifact and checksum discipline and state which forward pass or decode step it
-observed.
+`activation_captures` is a list of `ArtifactRef` records. V1.2 does not record
+activations during generation, but a trace can reference capture artifacts
+without a schema change. In practice V1.2 capture records
+(`wsp.trace-capture/1.0`) point *at* a trace instead: they name the trace, the
+replay plan and result, the alignment, the module, the token positions, and the
+position semantics they measured, so a capture can be verified independently of
+whether it was ever linked back into the trace.
+
+Captures preserve the same artifact and checksum discipline as everything else
+and state which forward pass and which token positions they observed.
 
 ## Versioning policy
 
 - Additive fields may appear in a compatible minor revision, but the current
-  canonical version is explicitly `wsp.trace/1.0`.
+  canonical version is explicitly `wsp.trace/1.1`. V1.1 wrote `wsp.trace/1.0`;
+  those records still validate and are never rewritten in place.
 - Removing or changing the meaning of a field requires a new schema version.
 - Importers validate what they understand and preserve unknown metadata.
 - The workbench never silently upgrades or rewrites a stored trace. A new

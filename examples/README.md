@@ -56,7 +56,36 @@ The script prints the finding kinds, contrast status, case id, and reload
 results. It is an infrastructure demonstration, not a scientific claim about a
 real model.
 
-## 4. Same patch through the CLI
+## 4. Replay, alignment, capture, and investigation evidence
+
+```bash
+python examples/investigation_walkthrough.py
+```
+
+This runs the V1.2 chain against a small causal transformer built in process:
+
+- records a looping generation, a terminating control, and a third trace with a
+  genuinely different input;
+- runs the detectors and resolves the finding onto token positions;
+- prepares and verifies a teacher-forced replay, reporting numerical agreement
+  and the explicit `generation_reproducibility: not-claimed`;
+- aligns tokens to prompt/generation/full positions;
+- captures selected activations at a chosen module;
+- compares an identical-context control (which must be zero) and a
+  different-input pair (which must not be);
+- attaches the measurements to a failure case as investigation evidence;
+- exports the case privately, imports it into a fresh workspace, and re-verifies
+  every reference and checksum;
+- confirms the model parameters did not change;
+- repeats the export in redacted mode and checks that the source prompt is gone.
+
+Nothing is downloaded. Pass `--model <local checkpoint>` to run the same chain
+against a real Hugging Face checkpoint instead of the synthetic model.
+
+The script is an infrastructure demonstration. It does not claim to find a real
+model defect or a causal mechanism.
+
+## 5. Same patch through the CLI
 
 ```bash
 wsp --workspace examples/out/workspace call create_patch \

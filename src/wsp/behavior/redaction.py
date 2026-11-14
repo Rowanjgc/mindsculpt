@@ -29,6 +29,7 @@ from wsp.workspace.privacy import (
     redact_generation_params,
     safe_display_name,
     scrub_model_ref,
+    scrub_tokenizer_ref,
     scrub_provenance,
     transform_artifact,
 )
@@ -147,6 +148,7 @@ def redact_trace_payload(
         payload["prompt"] = prompt
 
     payload["model"] = scrub_model_ref(payload.get("model"), removed)
+    payload["tokenizer"] = scrub_tokenizer_ref(payload.get("tokenizer"), removed)
 
     backend = payload.get("backend")
     if isinstance(backend, dict):

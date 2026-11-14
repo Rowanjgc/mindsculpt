@@ -1190,6 +1190,20 @@ def scrub_model_ref(model: Any, removed: RemovedText) -> dict[str, Any] | None:
     return model
 
 
+def scrub_tokenizer_ref(tokenizer: Any, removed: RemovedText) -> dict[str, Any] | None:
+    """Remove a tokenizer label: its fingerprint is the identity that matters.
+
+    ``name`` is ``name_or_path`` for a locally loaded tokenizer, so it can carry
+    a directory path that is itself sensitive.
+    """
+
+    if not isinstance(tokenizer, dict):
+        return None
+    tokenizer = dict(tokenizer)
+    tokenizer["name"] = safe_display_name(tokenizer.get("name"), removed)
+    return tokenizer
+
+
 def base64_payload(data: bytes) -> str:
     return base64.b64encode(data).decode("ascii")
 

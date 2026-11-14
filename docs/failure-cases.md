@@ -26,7 +26,8 @@ cause, a confirmed detector hit, or a weight edit.
 | `reproduction` | Backend, command, notes, environment, parameters, seed |
 | `annotations` | Human notes with author and kind |
 | `hypotheses` | Explicitly labelled candidate explanations |
-| `activation_captures` | `ArtifactRef` records for activation evidence |
+| `activation_captures` | `ArtifactRef` records for V1 hook activation evidence |
+| `investigations` | `InvestigationLink` records pointing at investigation-evidence artifacts |
 | `patches` | Patch or patch-set references |
 | `tags` | Free-form labels for filtering |
 | `metadata` | Additional structured information |
@@ -59,7 +60,7 @@ A hypothesis is always marked with one of:
 - `refuted` — evidence contradicts it,
 - `inconclusive` — evidence is insufficient.
 
-The workbench does not move hypotheses automatically. Nothing in V1.1 claims
+The workbench does not move hypotheses automatically. Nothing in V1.2 claims
 that a weight, direction, layer, or activation caused the observed behavior.
 
 ## Reference validation
@@ -69,6 +70,11 @@ On creation and save, the case store verifies:
 - every observation and control trace exists and its artifact checksum matches,
 - every contrast artifact exists and has kind `contrast_result`,
 - every activation-capture artifact exists and verifies,
+- every investigation-evidence artifact exists, has kind
+  `investigation_evidence`, carries the linked `evidence_id`, belongs to the
+  same case when it records a `case_id`, and whose referenced capture artifacts
+  exist with kind `trace_capture` and comparison artifacts with kind
+  `capture_comparison`,
 - every patch or patch-set identifier exists in the workspace.
 
 A case may reference a trace whose activation data is absent; that is normal.
@@ -119,12 +125,15 @@ privacy policy:
     {"artifact_id": "a_...", "kind": "patch_payload", "format": "npy",
      "sha256": "sha256:...", "nbytes": 1234, "data_base64": "..."}
   ],
+  "payload_artifacts": [],
+  "investigation_artifacts": [],
   "artifact_map": {},
   "references": {
     "traces": [],
     "contrast_artifact_ids": [],
     "activation_capture_artifact_ids": [],
-    "patches": []
+    "patches": [],
+    "investigation_artifact_ids": []
   },
   "warnings": []
 }
@@ -135,6 +144,13 @@ embedded traces are stored as immutable trace artifacts, contrast results and
 activation artifacts are recreated from their payloads (content addressing gives
 them the same identifiers), patch payload artifacts are restored, and
 patches/patch sets are restored through the existing workspace store.
+
+Investigation evidence is exported as a *graph*, not as one file. A private
+export walks the evidence record and embeds everything it reaches — capture
+records, retained activation vectors, replay plans and results, token alignments,
+span resolutions, and comparisons — so the restored case can reproduce the same
+measurements. A redacted export keeps only the capture and comparison artifacts,
+because replay results and alignments embed recorded token text.
 
 `import_failure_case` verifies:
 
@@ -171,6 +187,11 @@ replaced, and every replaced string is remembered.
 - detector evidence names/details, finding explanations and free-form values,
 - contrast test names, variant inputs/outputs, expectations, and observed values,
 - activation-capture payloads (reduced to metadata and summary statistics),
+- investigation-evidence titles, summaries, notes, hypothesis statements, and
+  detector values,
+- evidence links to replay, alignment, and span artifacts (those artifacts embed
+  recorded token text and are not part of a redacted export),
+- retained activation vectors and their checksums,
 - provenance notes, environment metadata, warnings, and serialized errors.
 
 Redacted exports rewrite nested artifacts rather than copying them: contrast
@@ -191,8 +212,15 @@ token ids are dropped, the export is no longer reproducible evidence and is
 marked `replay_capability: "unavailable"`. With `keep_token_ids=true` it is
 `"reduced"`: positions can be replayed only against the same tokenizer and model.
 
-A linked artifact that cannot be transformed safely (for example an array or an
-opaque binary blob) makes the redacted export **fail**. Setting
+Retained activation vectors are the one numeric kind that is dropped by design
+rather than refused: a vector's content *is* the measurement, so there is no way
+to remove the source text from it. The export drops the artifact, rewrites the
+capture measurement to `retained: false` with `value_artifact_id: null`, records
+`artifact_map[old_id] = null`, and adds a limitation. That is a deliberate,
+recorded reduction — not a silent omission.
+
+A linked artifact of any other kind that cannot be transformed safely (for
+example an opaque binary blob) makes the redacted export **fail**. Setting
 `on_untransformable_artifact: "omit"` accepts a recorded gap instead: the artifact
 is dropped, `artifact_map` maps it to `null`, and a limitation is added. A linked
 contrast result that does not match its own schema is refused, because the

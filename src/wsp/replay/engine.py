@@ -230,6 +230,32 @@ def _identity_checks(plan: ReplayPlan, info: ReplayModelInfo) -> list[ReplayChec
     return checks
 
 
+def _embedding_rows(model: Any) -> int | None:
+    """Vocabulary size as the model actually implements it.
+
+    A config's ``vocab_size`` is not authoritative: multimodal and hybrid
+    checkpoints often pad the embedding matrix beyond the configured text
+    vocabulary, and the tokenizer emits the padded ids.  The embedding matrix is
+    the thing that has to accept the token, so it wins when it is available.
+    """
+
+    module = _torch_module(model)
+    if module is None:
+        return None
+    getter = getattr(module, "get_input_embeddings", None)
+    embedding = None
+    if callable(getter):
+        try:
+            embedding = getter()
+        except Exception:  # pragma: no cover - defensive, model specific
+            embedding = None
+    weight = getattr(embedding, "weight", None)
+    shape = getattr(weight, "shape", None)
+    if shape is not None and len(shape) >= 1:
+        return int(shape[0])
+    return None
+
+
 def _select_logits(logits: torch.Tensor, sequence_length: int) -> torch.Tensor:
     if logits.dim() == 2:
         logits = logits.unsqueeze(0)
@@ -434,7 +460,7 @@ def execute_replay(
             details={"tokens": length, "limit": limit},
         )
 
-    vocabulary = info.tokenizer_vocab_size
+    vocabulary = _embedding_rows(model) or info.tokenizer_vocab_size
     if vocabulary is None:
         module = _torch_module(model)
         config = getattr(module, "config", None) if module is not None else None

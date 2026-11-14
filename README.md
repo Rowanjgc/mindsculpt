@@ -4,12 +4,12 @@ An open-source, model-agnostic **Weight-Space Programming Workbench**: bounded
 instruments for observing, inspecting, measuring, patching, executing, and
 reproducing work on neural-network weights and behavior.
 
-V1.1 is deliberately **tools first**. It is not an autonomous agent, a training
+V1.2 is deliberately **tools first**. It is not an autonomous agent, a training
 loop, a benchmark platform, or an interpreter for neurons. It provides reliable
 primitives that a person or a future tool-using agent can compose, with the same
 operations exposed through Python, a CLI, and JSON tool schemas.
 
-> **Status:** V1.1 complete. CPU-only, offline tests and examples. No LLM, cloud
+> **Status:** V1.2 complete. CPU-only, offline tests and examples. No LLM, cloud
 > service, API key, or network access is required.
 
 ## What V1 includes
@@ -56,6 +56,35 @@ operations exposed through Python, a CLI, and JSON tool schemas.
   artifact, recompute their checksums and identifiers, and then scan the
   serialized bundle for every removed string. An export that cannot be proven
   clean is refused, and reduced replay capability is recorded explicitly.
+
+## What V1.2 adds: internal investigation
+
+V1.2 connects observable behavior to reproducible internal measurements. It is
+still an instrument kit: it measures, it does not conclude.
+
+- **Verified replay** — a teacher-forced replay plan that resolves the recorded
+  token sequence, audits model/tokenizer/template identity, and executes bounded
+  forward passes. Four guarantees are reported separately: token-sequence
+  reconstruction, forward execution, numerical agreement with recorded
+  log-probabilities, and generation reproducibility (always `not-claimed` for
+  teacher forcing).
+- **Token alignment** — prompt, generation, and full-sequence index spaces with
+  character/byte ranges where they are trustworthy, special-token flags, and
+  explicit `consuming` vs `predicting` semantics, so a state is never confused
+  with the token it predicts. Ambiguous spans are reported, not invented.
+- **Targeted capture** — summary statistics or retained vectors at selected
+  module and token positions, bounded by element/position/artifact budgets, with
+  hook cleanup on error paths and a parameter-immutability check on every pass.
+- **Optional instrumentation backend** — an isolated NNsight/nnterp adapter that
+  normalises layer paths, refuses unsupported architectures instead of guessing,
+  and records its own backend identity. The plain PyTorch hook backend stays the
+  default and needs no extra dependencies.
+- **Controlled comparisons** — position-aligned numerical comparison of two
+  captures with compatibility validation, shared metric implementations, and
+  reviewed pairings. No dimension is ever labelled with a concept.
+- **Investigation evidence** — findings, replays, alignments, captures,
+  comparisons, and unverified hypotheses linked to a failure case, exported and
+  reloaded with rewritten references and explicit omission records.
 
 ## Install
 
@@ -121,6 +150,39 @@ wsp traces
 wsp scan-trace tr_... --detector core.repetition
 wsp detectors
 ```
+
+### Internal investigation workflow (offline)
+
+```bash
+python examples/investigation_walkthrough.py
+```
+
+It records a looping generation and a terminating control, resolves the detector
+finding onto token positions, plans and verifies a teacher-forced replay,
+captures selected states at a chosen module, compares an identical-context
+control and a genuinely different input, attaches the measurements to a failure
+case as investigation evidence, exports the case, imports it into a fresh
+workspace, verifies every reference and checksum, confirms the model parameters
+did not change, and finally demonstrates a redacted export. It is an
+infrastructure demonstration, not a scientific result.
+
+The same walkthrough runs against a real local checkpoint:
+
+```bash
+python examples/investigation_walkthrough.py \
+    --model ~/.cache/huggingface/hub/models--Qwen--Qwen3.5-0.8B/snapshots/<revision>
+```
+
+Tier-3 integration tests are separate from the default suite and never download
+weights:
+
+```bash
+WSP_REAL_MODEL=<local checkpoint directory> \
+    .venv/bin/python -m pytest tests/integration/test_real_checkpoint.py -q
+```
+
+A skipped tier-3 run means real-checkpoint compatibility is unverified on that
+machine, not that it passed.
 
 ### CLI walkthrough
 

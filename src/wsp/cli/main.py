@@ -579,6 +579,80 @@ def capture(
     _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
 
 
+@app.command("align")
+def align_tokens(
+    ctx: typer.Context,
+    trace_id: str = typer.Argument(..., help="Stored trace to align."),
+    model: str | None = typer.Option(
+        None,
+        "--model",
+        help="Model source JSON; needed for tokenizer offsets and the special-token set.",
+    ),
+    limit: int = typer.Option(64, "--limit", help="Positions to echo."),
+    no_positions: bool = typer.Option(False, "--no-positions"),
+    input_json: str | None = typer.Option(
+        None, "--json", help="Full AlignTraceTokensInput payload."
+    ),
+) -> None:
+    """Map a trace's tokens onto forward positions."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    if input_json:
+        payload = json.loads(input_json)
+    else:
+        payload = {
+            "trace_id": trace_id,
+            "include_positions": not no_positions,
+            "position_limit": limit,
+        }
+        if model:
+            payload["model"] = json.loads(model)
+    envelope = service.call("align_trace_tokens", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("resolve-span")
+def resolve_span_command(
+    ctx: typer.Context,
+    trace_id: str = typer.Argument(..., help="Stored trace the span belongs to."),
+    kind: str = typer.Option(
+        "token_range",
+        "--kind",
+        help="token_range, text_span, word_range, or finding_evidence.",
+    ),
+    role: str = typer.Option("generation", "--role", help="prompt or generation."),
+    start: int | None = typer.Option(None, "--start"),
+    end: int | None = typer.Option(None, "--end"),
+    alignment: str | None = typer.Option(None, "--alignment", help="Stored alignment artifact id."),
+    detail: str | None = typer.Option(
+        None, "--detail", help="JSON EvidenceRef for kind=finding_evidence."
+    ),
+    model: str | None = typer.Option(None, "--model"),
+    input_json: str | None = typer.Option(
+        None, "--json", help="Full ResolveFindingSpanInput payload."
+    ),
+) -> None:
+    """Resolve a behavioral span onto token positions."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    if input_json:
+        payload = json.loads(input_json)
+    else:
+        payload = {"trace_id": trace_id, "kind": kind}
+        if detail:
+            payload["detail"] = json.loads(detail)
+        else:
+            if start is None or end is None:
+                raise typer.BadParameter("provide --start and --end, or --detail")
+            payload["role"] = role
+            payload["start"] = start
+            payload["end"] = end
+        if alignment:
+            payload["alignment_artifact_id"] = alignment
+        if model:
+            payload["model"] = json.loads(model)
+    envelope = service.call("resolve_finding_span", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
 @app.command("compare-captures")
 def compare_captures(
     ctx: typer.Context,

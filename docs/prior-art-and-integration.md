@@ -222,6 +222,28 @@ activation-level investigation, and pinning a pre-release pair would make the co
 fragile. The evidence format reserves activation-capture references, and the review
 records the exact working versions and constraints for a future optional adapter.
 
+### V1.2 outcome: implemented as an optional adapter
+
+The A/B tests above were re-run during V1.2 and the adapter was implemented in
+`wsp.investigation.nnsight_backend`:
+
+- it lives behind the same capture protocol as the plain PyTorch hook backend, so
+  the shared `MeasurementBuilder` produces comparable numbers from both;
+- it is installed through the optional `instrumentation` extra
+  (`nnsight==0.8.2`, `nnterp==2.0.0rc1`) and is never imported by the CPU-only
+  core;
+- it loads the checkpoint with `attn_implementation="eager"` because nnterp only
+  exposes attention outputs under eager attention on a pre-built module;
+- it records `backend: "nnterp"` plus both versions in every capture record, and
+  refuses unsupported architectures instead of guessing at a module layout;
+- it was validated against the tiny locally constructed Qwen3.5 hybrid
+  checkpoint (Gated DeltaNet interleaved with full attention) and against a real
+  local Qwen3.5-0.8B checkpoint.
+
+Cross-backend agreement was measured on the synthetic hybrid fixture: the same
+position of `model.layers.1` (hooks) and `layers.1` (nnterp) agree to within
+`1e-6`. The generic hook backend remains the default and the only mandatory one.
+
 ## 9. Secondary references
 
 | Project | Relevant capability | Decision |
@@ -242,7 +264,7 @@ These are not installed, and no core interface depends on them.
 | Inspect Scout | Reference finding vocabulary; defer adapter | Transcript model mismatch and duckdb dependency |
 | LangTest | Reference perturbation ideas; defer | Hosted-provider and Python-version constraints |
 | INIF | Adapter for format 0.1; canonical schema stays native | Useful interchange, unstable upstream |
-| NNsight/nnterp | Defer; document tested versions and caveats | Optional, pre-release pairing, no V1.1 requirement |
+| NNsight/nnterp | Adopt as an optional instrumentation backend | Pre-release pairing is acceptable when pinned and optional; adds normalised layer access |
 | TransformerLens/pyvene/EasyEdit/SAELens/lm-eval | Reference/defer | Overlap or out of scope |
 
 ## 11. Consequences for the V1.1 architecture

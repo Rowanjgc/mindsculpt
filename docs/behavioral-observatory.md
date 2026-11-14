@@ -225,10 +225,17 @@ A case is a persistent investigation record that may reference:
 - human annotations and review status,
 - hypotheses, explicitly marked as hypotheses,
 - activation-capture artifacts,
+- investigation-evidence records produced by V1.2 replay and measurement,
 - weight patches or patch sets.
 
 A case may be created from a single unexplained reproducible observation. A
 known cause is not required. See `docs/failure-cases.md`.
+
+V1.2 extends a case rather than replacing it: an `investigations` entry links a
+case to an evidence artifact that records the replay, the token alignment, the
+captures, and the comparisons behind a finding. The behavioral layer stays the
+front door; the measurement layer is reachable from it. See
+`docs/activation-investigation.md`.
 
 ## Structured operations
 
@@ -255,6 +262,13 @@ inputs are pydantic models with `extra="forbid"`; all outputs use the same
 | `update_failure_case` | Update review, annotations, or hypotheses | Required |
 | `export_failure_case` | Write a self-contained bundle | Required |
 | `import_failure_case` | Verify and reload a bundle | Required |
+
+V1.2 adds the replay, alignment, and investigation operations listed in
+`docs/tool-api.md`. They use the same envelope and error codes.
+
+V1.2 CLI commands: `replay-plan`, `replay`, `align`, `resolve-span`,
+`capture-points`, `capture`, `compare-captures`, `attach-evidence`, and
+`inspect-evidence`.
 
 CLI commands call the same service: `record-trace`, `traces`,
 `inspect-trace`, `scan-trace`, `compare-traces`, `contrast`, `detectors`,
@@ -314,9 +328,12 @@ This is an explicit choice, not a hidden one:
 The example is an infrastructure demonstration. It does not claim that any real
 model defect was found or fixed.
 
+`examples/investigation_walkthrough.py` continues the chain into V1.2: replay,
+alignment, capture, comparison, evidence, and a private plus redacted export.
+
 ## Non-goals
 
-V1.1 does not include autonomous agents, automatic weight-patch discovery,
+V1.2 does not include autonomous agents, automatic weight-patch discovery,
 gradient training, automatic causal explanations, benchmark leaderboards, a GUI,
 distributed inference, GGUF editing, or a large defect taxonomy. Generation-time
 activation capture is referenced by the schema but not implemented.

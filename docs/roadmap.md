@@ -96,9 +96,46 @@ implemented merely because they sound useful.
   layer.
 - Offline CPU tests and an end-to-end example with synthetic traces.
 
+## Completed in V1.2
+
+### Replay and alignment
+
+- Teacher-forced replay plans (`wsp.replay-plan/1.0`) that resolve the recorded
+  token sequence explicitly, audit replayable traces, and declare tolerances.
+- Replay results (`wsp.replay/1.0`) that report four independent statuses:
+  token-sequence reconstruction, forward execution, numerical agreement, and —
+  always `not-claimed` — generation reproducibility.
+- Model, tokenizer, chat-template, and parameter-identity verification, plus a
+  parameter fingerprint taken before and after every forward pass.
+- Token alignment (`wsp.alignment/1.0`) with prompt/generation/full index
+  spaces, character and byte ranges where trustworthy, special-token flags, and
+  explicit `consuming`/`predicting` semantics.
+- Span resolution (`wsp.span-resolution/1.0`) from detector findings, token
+  ranges, and text spans, reporting ambiguity and unresolved mappings instead of
+  guessing.
+
+### Activation investigation
+
+- Capture points with architectural classification, in two instrumentation
+  backends: plain PyTorch hooks (default) and an optional isolated NNsight/nnterp
+  adapter that records its own backend identity.
+- Targeted capture (`wsp.trace-capture/1.0`) in `summary` and `selected` modes,
+  bounded by element, position, module, and artifact budgets, with hook cleanup
+  and inference mode guaranteed.
+- Capture comparison (`wsp.capture-comparison/1.0`) with reviewed or identical
+  position alignment, shared numerical metrics, and compatibility validation.
+- Investigation evidence (`wsp.investigation-evidence/1.0`) linking findings,
+  replays, alignments, captures, comparisons, and unverified hypotheses to a
+  failure case.
+- Case export/import of the new artifact types in both private and redacted
+  modes, with rewritten references, recomputed ids, and explicit omission
+  records.
+- An offline end-to-end walkthrough, a synthetic hybrid transformer fixture, and
+  an optional real-checkpoint test procedure.
+
 ## Deliberately deferred
 
-These are **not** in V1.1:
+These are **not** in V1.2:
 
 - Autonomous research agents or LLM provider integration.
 - Automatic weight-edit discovery, gradient optimization, or fine-tuning.
@@ -115,6 +152,9 @@ These are **not** in V1.1:
 - LLM-based evaluators or hosted evaluation providers.
 - Automatic weight-patch discovery from behavioral findings.
 - A large defect taxonomy or benchmark leaderboard.
+- Activation patching, ablation, or counterfactual continuation experiments.
+- Generation-time activation recording over long generations.
+- Automatic span selection or automatic mechanism naming.
 
 ## Possible future work (hypotheses, not commitments)
 

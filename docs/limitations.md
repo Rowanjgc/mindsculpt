@@ -1,6 +1,6 @@
 # Limitations and safety boundaries
 
-V1.1 is an instrument kit, not a complete research harness. The following limits
+V1.2 is an instrument kit, not a complete research harness. The following limits
 are intentional and should be visible in results rather than worked around
 silently.
 
@@ -137,7 +137,7 @@ silently.
 - The workbench reports measurements. It does not decide that a direction,
   neuron, or layer “means” something because a number changed.
 - There is no significance testing, causal claim generation, or automatic
-  circuit interpretation in V1.1.
+  circuit interpretation in V1.2.
 - There is no benchmark platform, leaderboard, or claim of improved model
   capability.
 - A patch that produces a measurable difference is not evidence that the edit
@@ -192,7 +192,59 @@ silently.
 - Cases link evidence; they do not prove causation. Hypotheses remain
   hypotheses.
 
-## Known V1.1 gaps
+## Replay and alignment
+
+- Teacher-forced replay does not regenerate tokens. A replay result always
+  reports `generation_reproducibility: not-claimed`, and no V1.2 code path
+  upgrades that to a claim.
+- `numerical_agreement: verified` means the recorded token log-probabilities were
+  reproduced within the declared tolerance on this machine with this checkpoint.
+  It is not a statement about sampling, caching, or another device.
+- Replay requires recorded token ids, or recorded text plus an explicit encoder
+  and encoding. A chat-template trace without stored token ids is refused rather
+  than re-rendered.
+- Replay uses the model's own forward pass. Hybrid and recurrent stacks
+  (Gated DeltaNet, Mamba-style mixers) may compute different intermediates than
+  cached autoregressive decoding; the plan and result carry a limitation saying
+  so instead of asserting equivalence.
+- CPU replay is not bitwise identical to GPU replay, and bf16/fp16 execution adds
+  a precision limitation to every result where it applies.
+- Character offsets are only reported when they can be validated against the
+  recorded text. Non-ASCII text the tokenizer cannot encode round-trip (for
+  example an unknown-token fallback) yields `null` offsets, an `unavailable`
+  entry, and a warning.
+- A text span that begins or ends inside a token is reported as ambiguous with a
+  coverage fraction. The workbench does not silently pick the nearest boundary.
+- A local window is never treated as equivalent to the full context: requesting
+  one sets `context_mode: "explicit-window"` and warns that the causal prefix is
+  not preserved.
+
+## Activation investigation
+
+- Captures happen on a teacher-forced replay, not on the original generation.
+  Live generation-time capture with KV caches is not implemented.
+- Summary mode retains statistics, not values. Elementwise comparison of two
+  summary captures is refused with an explicit `unavailable` reason.
+- `selected` mode stride-samples vectors larger than the per-tensor element
+  limit and records `sampled`/`stride`; it does not silently downcast.
+- The plain hook backend addresses the checkpoint's own module names. The nnterp
+  backend addresses normalised names. A path from one backend is not valid in
+  the other, and the backends are never substituted silently.
+- The nnterp adapter requires `attn_implementation="eager"` for attention-output
+  capture, refuses architectures nnterp does not cover, and pins its tested
+  versions. It is validated against a locally constructed tiny hybrid Qwen3.5
+  checkpoint, not against every hybrid architecture.
+- A large activation difference is not a mechanism, and a small one is not
+  evidence against one. Comparisons carry this limitation and never label
+  dimensions, neurons, or directions with concepts.
+- Explicit position pairings (`paired_positions`, `semantic_event`) must be
+  marked `reviewed`. The workbench cannot decide that two contexts represent the
+  same event.
+- `sensitive_markers` is the only mechanism for content hidden inside
+  identifier-shaped fields. Undeclared identifiers that look structural are
+  removed but not searched for.
+
+## Known V1.2 gaps
 
 - No MCP server is included. The JSON schemas and service layer are designed so
   a thin adapter can be added without changing core logic.
@@ -203,3 +255,11 @@ silently.
 - No automatic GPU memory planning or multi-device execution.
 - No patch composition on a single tensor inside one set.
 - No bitwise replay guarantee across machines.
+- No activation patching, ablation, or counterfactual continuation. V1.2
+  measures states; it does not intervene on them.
+- No automatic span selection, mechanism discovery, or dimension labelling.
+- No generation-time activation recording, and no pooled aggregation of raw
+  activations across positions beyond the documented summary statistics.
+- The optional nnterp backend has been exercised on one synthetic hybrid
+  architecture and on one real Qwen3.5 hybrid checkpoint; other families are
+  untested and may be refused.

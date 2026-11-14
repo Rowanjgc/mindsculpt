@@ -30,6 +30,9 @@ in the domain modules.
 | `wsp.execution` | Inference-mode forward passes, model loading, output comparison, offline demo models |
 | `wsp.workspace` | Local content-addressed artifacts, run records, experiments, patch/trace/case storage |
 | `wsp.behavior` | Trace schema/storage, generation backends, detectors, evaluators, contrasts, failure cases |
+| `wsp.replay` | Replay plans, teacher-forced execution, verification, replay model adapters |
+| `wsp.alignment` | Token alignment and behavioral span resolution |
+| `wsp.investigation` | Capture points, positioned capture backends, measurement building, comparisons, evidence |
 | `wsp.tools` | Pydantic tool schemas, operation registry, shared `ToolService` |
 | `wsp.cli` | Typer commands; every command prints the service’s JSON envelope |
 | `wsp.adapters` | Optional model and format adapters: local Hugging Face, INIF 0.1, Inspect AI logs |
@@ -179,6 +182,47 @@ All schemas are versioned and JSON-compatible.
 | `wsp.case-export/1.1` | Self-contained case bundle with privacy metadata |
 | `wsp.export-policy/1.0` | Export privacy policy and its declared limitations |
 | `wsp.redaction/1.0` | Record of what a redacted export removed |
+| `wsp.replay-plan/1.0` | Resolved replay plan with checks and declared tolerances |
+| `wsp.replay/1.0` | Executed replay with four independent status levels |
+| `wsp.alignment/1.0` | Token positions in prompt/generation/full index spaces |
+| `wsp.span-resolution/1.0` | Behavioral span mapped onto token positions |
+| `wsp.capture-points/1.0` | Addressable modules with architectural roles |
+| `wsp.trace-capture/1.0` | Trace-linked activation measurements |
+| `wsp.activation-vector/1.0` | Retained activation vector artifact metadata |
+| `wsp.capture-comparison/1.0` | Numerical comparison of two captures |
+| `wsp.investigation-evidence/1.0` | Measurement chain attached to a case |
+
+### Replay, alignment, and measurement
+
+`prepare_replay` turns a stored trace into a `ReplayPlan`: the recorded token
+sequence is resolved (token ids verbatim, or re-derived from text when the trace
+recorded an encoding), model/tokenizer/template identities are recorded, declared
+tolerances are fixed, and every check gets a status. `verify_replay` executes the
+plan through the model's own forward pass under `torch.inference_mode()`,
+compares recorded token log-probabilities with replay values, and reports
+`numerical_agreement` separately from `generation_reproducibility` (which is
+always `not-claimed` for teacher forcing). A parameter fingerprint is compared
+before and after the pass; a change raises instead of returning numbers.
+
+`build_alignment` maps recorded tokens into prompt, generation, and full-sequence
+index spaces with character/byte ranges where they are trustworthy, and records
+`consuming`/`predicting` semantics so a caller cannot confuse "the state at this
+token" with "the state that predicts it". `resolve_span` maps detector evidence
+onto those positions and reports ambiguity or an unresolved mapping explicitly.
+
+`capture_trace_activations` runs the same replay path with a positioned capture
+attached, so a measurement inherits replay verification and the immutability
+check. Two backends implement the same capture protocol: plain PyTorch forward
+hooks (always available) and an optional NNsight/nnterp adapter that normalises
+layer paths and refuses unsupported architectures rather than guessing. Both
+build measurements with the same shared builder, so their numbers are directly
+comparable, and both record their backend identity.
+
+`compare_captures` validates model, module, shape, mode, and alignment
+compatibility, then computes metrics from the shared tensor-difference
+implementation. `attach_investigation_evidence` packages the resulting chain —
+findings, replays, alignments, spans, captures, comparisons, and unverified
+hypotheses — as one artifact that a failure case can reference and export.
 
 ### Workspace layout
 

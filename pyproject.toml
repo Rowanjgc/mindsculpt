@@ -52,4 +52,5 @@ markers = [
   "slow: tests that take more than a few seconds",
   "hf: requires the optional transformers dependency",
   "gpu: requires a CUDA-capable device",
+  "real_model: requires WSP_REAL_MODEL to point at a local pretrained checkpoint",
 ]
