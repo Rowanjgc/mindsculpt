@@ -257,7 +257,7 @@ def import_inspect_log(
     source = Path(path).expanduser().resolve()
     header, samples = load_inspect_log(source, max_member_bytes=budget.max_trace_bytes)
     if len(samples) > budget.max_import_traces:
-        raise InputError(
+        raise ResourceLimitError(
             "Inspect log contains more samples than the configured import limit",
             details={"samples": len(samples), "limit": budget.max_import_traces},
         )

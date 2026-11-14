@@ -435,6 +435,14 @@ def list_evaluators(service: Any, request: ListEvaluatorsInput, budget: Budget, 
 def create_failure_case(service: Any, request: CreateFailureCaseInput, budget: Budget, run: Any):
     workspace = service.workspace
     _require_workspace(service)
+    if len(request.observations) + len(request.controls) > budget.max_case_traces:
+        raise ResourceLimitError(
+            "case references more traces than the configured limit",
+            details={
+                "traces": len(request.observations) + len(request.controls),
+                "limit": budget.max_case_traces,
+            },
+        )
     traces = TraceStore(workspace)
     reference_traces: list[GenerationTrace] = []
     for trace_id in request.observations + request.controls:

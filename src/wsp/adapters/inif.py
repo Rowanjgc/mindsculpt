@@ -27,7 +27,7 @@ from wsp.behavior.models import (
 )
 from wsp.behavior.trace import finalize_trace
 from wsp.core.budget import Budget
-from wsp.core.errors import InputError
+from wsp.core.errors import InputError, ResourceLimitError
 from wsp.core.time import utc_now_iso
 
 INIF_VERSION = "0.1"
@@ -145,7 +145,7 @@ def import_inif_document(
     if warnings_version:
         warnings.append(warnings_version)
     if len(samples) > budget.max_import_traces:
-        raise InputError(
+        raise ResourceLimitError(
             "INIF document has more samples than the configured import limit",
             details={"samples": len(samples), "limit": budget.max_import_traces},
         )
