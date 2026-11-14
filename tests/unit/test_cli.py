@@ -197,4 +197,4 @@ def test_cli_behavioral_workflow(tmp_path: Path) -> None:
     )
     assert exported.exit_code == 0, exported.stdout
     assert out.exists()
-    assert _json(out.read_text(encoding="utf-8"))["schema_version"] == "wsp.case-export/1.0"
+    assert _json(out.read_text(encoding="utf-8"))["schema_version"] == "wsp.case-export/1.1"

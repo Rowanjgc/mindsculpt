@@ -54,12 +54,27 @@ class ListTracesInput(ToolInput):
     limit: int = Field(default=50, ge=1, le=1_000)
 
 
+class ExportPolicyInput(BaseModel):
+    """Export privacy controls shared by every export operation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["private", "redacted"] = "private"
+    include_traces: bool = True
+    keep_token_ids: bool = False
+    sensitive_markers: list[str] = Field(default_factory=list)
+    on_untransformable_artifact: Literal["reject", "omit"] = "reject"
+
+
 class ExportTraceInput(ToolInput):
     trace_id: str
     format: Literal["wsp", "inif"] = "wsp"
     output_path: str
     overwrite: bool = False
-    redact_text: bool = False
+    redact_text: bool | None = Field(
+        default=None, description="Deprecated alias for policy.mode='redacted'."
+    )
+    policy: ExportPolicyInput = Field(default_factory=ExportPolicyInput)
 
 
 class ScanTraceInput(ToolInput):
@@ -184,8 +199,11 @@ class ExportFailureCaseInput(ToolInput):
     case_id: str
     output_path: str
     overwrite: bool = False
-    include_traces: bool = True
-    redact_text: bool = False
+    include_traces: bool | None = None
+    redact_text: bool | None = Field(
+        default=None, description="Deprecated alias for policy.mode='redacted'."
+    )
+    policy: ExportPolicyInput = Field(default_factory=ExportPolicyInput)
 
 
 class ImportFailureCaseInput(ToolInput):

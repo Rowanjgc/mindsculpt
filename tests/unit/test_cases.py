@@ -234,7 +234,7 @@ def test_case_export_and_reload_in_fresh_workspace(
     )["data"]
     assert Path(exported["output_path"]).exists()
     bundle = json.loads(out.read_text(encoding="utf-8"))
-    assert bundle["schema_version"] == "wsp.case-export/1.0"
+    assert bundle["schema_version"] == "wsp.case-export/1.1"
     assert bundle["case_sha256"] == created["case_sha256"]
     assert len(bundle["traces"]) == 2
     assert bundle["contrast_results"][0]["artifact_id"] == contrast_artifact
@@ -275,7 +275,10 @@ def test_redacted_export_removes_trace_text(
         assert trace["text"] is None
         assert all(token["text"] is None for token in trace["tokens"])
         assert trace["privacy"]["redacted"] is True
-    assert any("not redacted" in warning for warning in bundle["warnings"])
+    assert bundle["privacy"]["mode"] == "redacted"
+    assert bundle["privacy"]["limitations"]
+    assert bundle["case"]["redaction"]["leak_scan"] == "clean"
+    assert any("redacted export" in warning for warning in bundle["warnings"])
 
 
 def test_export_checksum_tampering_is_rejected(

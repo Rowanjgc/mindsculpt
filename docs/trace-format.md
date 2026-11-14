@@ -26,8 +26,8 @@ delete the artifact.
 | --- | --- |
 | `model` | `name`, `revision`, optional local `checkpoint_path`, `structure_fingerprint`, `file_sha256`, `parameter_count`, metadata |
 | `tokenizer` | `name`, `revision`, `kind`, `vocab_size`, `fingerprint`; optional |
-| `input` | Exact `text`, optional `system`, chat `messages`, optional artifact reference and SHA-256 |
-| `prompt` | Optional template name/hash and rendered prompt |
+| `input` | Exact `text`, optional `system`, chat `messages`, recorded `token_ids` with `tokens_sha256`, `token_encoding` (`chat_template`, `text`, `unknown`), `add_special_tokens`, optional artifact reference and SHA-256 |
+| `prompt` | Optional template name/hash, rendered prompt, and `add_generation_prompt` |
 | `backend` | Backend name/version, device, dtype, determinism hint, runtime versions |
 | `params` | `max_new_tokens`, `temperature`, `top_p`, `top_k`, `repetition_penalty`, `stop_sequences`, sampling flag, log-probability options, extra settings |
 | `seed` | Integer seed, or null when unknown |
@@ -157,8 +157,9 @@ reasons. `warnings` carries non-fatal issues that do not map to one field.
 - `redacted=true` records that stripping happened, either at collection time or
   during export.
 - `classification` is a caller-supplied label. It is not a security control.
-- Export redaction additionally removes local model paths, source paths, and
-  tool-call arguments.
+- Export redaction removes model names, local paths, file names, tool-call
+  arguments, token ids, and prompt rendering, and rewrites any linked artifacts.
+  See [failure-cases.md](failure-cases.md#redaction).
 - The workbench does not encrypt, upload, or automatically expire traces. A
   workspace is a local directory; retention is managed by the user.
 

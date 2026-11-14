@@ -76,49 +76,50 @@ Activation captures are optional evidence, not a requirement.
 
 ## Export bundle
 
-`export_failure_case` writes a self-contained JSON document:
+`export_failure_case` writes a self-contained JSON document and takes an explicit
+privacy policy:
 
 ```json
 {
-  "schema_version": "wsp.case-export/1.0",
+  "schema_version": "wsp.case-export/1.1",
   "exported_at": "2026-11-14T20:00:00Z",
   "case_sha256": "sha256:...",
   "case": { "...": "wsp.case/1.0" },
+  "privacy": {
+    "mode": "private",
+    "policy": { "...": "wsp.export-policy/1.0" },
+    "limitations": [],
+    "removed_fields": 0,
+    "removed_strings": 0,
+    "checksums_dropped": [],
+    "replay_capability": "full",
+    "leak_scan": "clean"
+  },
   "traces": [
     {
       "trace_id": "tr_...",
       "artifact_id": "a_...",
       "artifact_sha256": "sha256:...",
       "redacted": false,
-      "trace": { "...": "wsp.trace/1.0" }
+      "trace": { "...": "wsp.trace/1.1" }
     }
   ],
   "contrast_results": [
-    {"artifact_id": "a_...", "sha256": "sha256:...", "nbytes": 1234, "payload": {}}
+    {"artifact_id": "a_...", "kind": "contrast_result", "format": "json",
+     "sha256": "sha256:...", "nbytes": 1234, "data_base64": "..."}
   ],
   "activation_captures": [
-    {
-      "artifact_id": "a_...",
-      "kind": "activation_capture",
-      "format": "json",
-      "sha256": "sha256:...",
-      "nbytes": 1234,
-      "data_base64": "..."
-    }
+    {"artifact_id": "a_...", "kind": "activation_capture", "format": "json",
+     "sha256": "sha256:...", "nbytes": 1234, "data_base64": "..."}
   ],
   "patches": [
     {"kind": "patch", "patch_id": "p_...", "payload": {}}
   ],
   "payload_artifacts": [
-    {
-      "artifact_id": "a_...",
-      "kind": "patch_payload",
-      "format": "npy",
-      "sha256": "sha256:...",
-      "nbytes": 1234,
-      "data_base64": "..."
-    }
+    {"artifact_id": "a_...", "kind": "patch_payload", "format": "npy",
+     "sha256": "sha256:...", "nbytes": 1234, "data_base64": "..."}
   ],
+  "artifact_map": {},
   "references": {
     "traces": [],
     "contrast_artifact_ids": [],
@@ -137,12 +138,13 @@ patches/patch sets are restored through the existing workspace store.
 
 `import_failure_case` verifies:
 
-- the export schema version,
+- the export schema version (legacy `wsp.case-export/1.0` bundles still import),
 - `case_sha256` against the canonical case payload,
-- each embedded trace id and (unless redacted) its content checksum,
+- each embedded trace id and its content checksum,
 - contrast and activation artifact identifiers/checksums against the restored
   content,
-- patch identifiers against their payloads.
+- patch identifiers against their payloads,
+- `artifact_map` targets against the artifacts actually restored.
 
 A tampered payload fails with `artifact_error`. An existing trace or case with
 the same identifier but different content is rejected unless `overwrite=true` is
@@ -150,27 +152,57 @@ explicitly supplied for the case; traces are immutable and are never overwritten
 
 ## Redaction
 
-`export_failure_case(redact_text=true)` removes:
+There is exactly one redaction implementation,
+`wsp.workspace.privacy`, shared by every export path (traces, cases, and later
+activation measurements). A redacted export is rebuilt rather than scrubbed
+field by field: every string that is not on an explicit structural allowlist is
+replaced, and every replaced string is remembered.
 
-- trace input text and chat messages,
-- decoded output text and token text,
-- rendered prompts,
-- local model/source paths,
-- tool-call arguments.
+`export_failure_case(policy={"mode": "redacted"})` removes:
 
-It keeps token ids, positions, termination, provenance, checksums, and reference
-identifiers. The bundle records `redacted=true` per trace and warns that
-human-authored titles, summaries, annotations, and hypotheses are **not**
-automatically redacted. Redacted traces cannot be checksum-verified against the
-original artifact; import accepts them as redacted evidence and reports it.
+- trace input text, chat messages, rendered prompts, and input checksums,
+- decoded output text, token text, token log-probabilities, and top alternatives,
+- token ids (they are decodable text with the right tokenizer) unless
+  `keep_token_ids=true` is explicitly requested,
+- model names, local checkpoint paths, and file names,
+- tool-call arguments, results, and their digests,
+- case titles and summaries, human annotations, hypothesis statements and
+  rationales, tags, review notes, and reproduction commands,
+- detector evidence names/details, finding explanations and free-form values,
+- contrast test names, variant inputs/outputs, expectations, and observed values,
+- activation-capture payloads (reduced to metadata and summary statistics),
+- provenance notes, environment metadata, warnings, and serialized errors.
 
-Redacted exports also clear the case's local model path and reproduction
-environment. They do **not** rewrite embedded `contrast_results`, which contain
-the exact authored test inputs and observed output previews by design. Review
-or omit contrast evidence before sharing a bundle that contains sensitive
-prompts. Activation-capture payloads are likewise included as stored unless the
-caller exports with `include_traces=false` and manages those artifacts
-separately.
+Redacted exports rewrite nested artifacts rather than copying them: contrast
+results, activation captures, patch payloads, and patch provenance are
+transformed, their bytes are re-checksummed, and their artifact identifiers are
+recomputed. `artifact_map` records every old identifier and its replacement (or
+`null` when the artifact was omitted), and the case's own references are rewritten
+to the new identifiers so the bundle stays internally consistent.
+
+After serialization the whole document is scanned for every removed string and
+for any caller-supplied `sensitive_markers`. A single hit is a hard error: the
+export is refused and no file is written. The scan is a backstop for the
+transformer, not a substitute for it.
+
+Limitations are recorded in the bundle (`privacy.limitations` and
+`case.redaction`), and the export says that replay capability is reduced. When
+token ids are dropped, the export is no longer reproducible evidence and is
+marked `replay_capability: "unavailable"`. With `keep_token_ids=true` it is
+`"reduced"`: positions can be replayed only against the same tokenizer and model.
+
+A linked artifact that cannot be transformed safely (for example an array or an
+opaque binary blob) makes the redacted export **fail**. Setting
+`on_untransformable_artifact: "omit"` accepts a recorded gap instead: the artifact
+is dropped, `artifact_map` maps it to `null`, and a limitation is added. A linked
+contrast result that does not match its own schema is refused, because the
+transformer cannot prove it covered every field.
+
+Redacted traces cannot be checksum-verified against the original artifact;
+import accepts them as redacted evidence and reports the reduced capability.
+Legacy `wsp.case-export/1.0` bundles produced by earlier releases may still
+contain nested contrast inputs. They are imported for compatibility but are not
+produced by the current exporter.
 
 ## Reload and portability
 

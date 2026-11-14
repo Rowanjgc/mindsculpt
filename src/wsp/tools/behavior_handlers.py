@@ -19,7 +19,6 @@ from wsp.behavior.cases import (
     build_export,
     case_sha256,
     import_export,
-    redact_trace,
 )
 from wsp.behavior.compare import compare_traces as compare_trace_records
 from wsp.behavior.contrast import run_contrast as run_contrast_test
@@ -49,6 +48,13 @@ from wsp.core.errors import InputError, NotFoundError, ResourceLimitError, Unsup
 from wsp.core.hashing import sha256_bytes, sha256_file
 from wsp.core.json import atomic_write_bytes, read_json
 from wsp.core.time import utc_now_iso
+from wsp.behavior.redaction import redact_trace_payload
+from wsp.core.budget import enforce_bytes
+from wsp.workspace.privacy import (
+    ExportPolicy,
+    RemovedText,
+    enforce_no_leaks,
+)
 from wsp.tools.behavior_schemas import (
     CompareTracesInput,
     CreateFailureCaseInput,
@@ -84,6 +90,26 @@ def _require_workspace(service: Any) -> None:
             "this operation requires a workspace; run 'wsp init' or pass --workspace",
             details={"hint": "the workspace stores traces, evidence, and cases"},
         )
+
+
+def _export_policy(request: Any) -> ExportPolicy:
+    """Resolve the export policy, honouring the deprecated ``redact_text`` alias."""
+
+    policy_input = getattr(request, "policy", None)
+    policy = (
+        ExportPolicy(**policy_input.model_dump())
+        if policy_input is not None
+        else ExportPolicy()
+    )
+    alias = getattr(request, "redact_text", None)
+    if alias is True and policy.mode != "redacted":
+        policy = policy.model_copy(update={"mode": "redacted"})
+    elif alias is False and policy.mode == "redacted":
+        raise InputError(
+            "redact_text=False contradicts policy.mode='redacted'",
+            details={"hint": "set policy.mode instead of the deprecated redact_text flag"},
+        )
+    return policy
 
 
 def _traces(service: Any) -> TraceStore:
@@ -301,10 +327,22 @@ def list_traces(service: Any, request: ListTracesInput, budget: Budget, run: Any
 def export_trace(service: Any, request: ExportTraceInput, budget: Budget, run: Any):
     traces = _traces(service)
     trace = traces.load(request.trace_id)
+    policy = _export_policy(request)
+    removed = RemovedText()
     warnings: list[str] = []
-    if request.redact_text:
-        trace = redact_trace(trace)
-        warnings.append("input and output text were redacted")
+    if policy.redacted:
+        payload = redact_trace_payload(
+            trace.model_dump(mode="json"),
+            policy,
+            removed,
+            keep_artifact_refs=False,
+        )
+        trace = GenerationTrace.model_validate(payload)
+        warnings.append(
+            "redacted export: prompt and output text were removed; "
+            "replay capability is unavailable and the trace is no longer "
+            "reproducible evidence"
+        )
     if request.format == "inif":
         payload = export_inif(trace)
         warnings.extend(
@@ -315,6 +353,12 @@ def export_trace(service: Any, request: ExportTraceInput, budget: Budget, run: A
     from wsp.core.json import dumps
 
     data = dumps(payload).encode("utf-8")
+    enforce_no_leaks(
+        data.decode("utf-8"),
+        [*removed.values, *policy.sensitive_markers],
+        what="trace export",
+    )
+    enforce_bytes(len(data), budget.max_artifact_bytes, what="trace export")
     output = Path(request.output_path).expanduser().resolve()
     atomic_write_bytes(output, data, overwrite=request.overwrite)
     return _result(
@@ -324,7 +368,16 @@ def export_trace(service: Any, request: ExportTraceInput, budget: Budget, run: A
             "output_path": str(output),
             "sha256": sha256_bytes(data),
             "nbytes": len(data),
-            "redacted": request.redact_text,
+            "redacted": policy.redacted,
+            "privacy": {
+                "mode": policy.mode,
+                "leak_scan": "clean",
+                "replay_capability": (
+                    "unavailable" if policy.redacted else "full"
+                ),
+                "limitations": policy.limitations(),
+                "removed_strings": len(removed),
+            },
         },
         warnings=_dedupe(warnings),
     )
@@ -607,12 +660,14 @@ def export_failure_case(service: Any, request: ExportFailureCaseInput, budget: B
     traces = TraceStore(workspace)
     cases = CaseStore(workspace, traces=traces)
     case = cases.load(request.case_id)
+    policy = _export_policy(request)
+    if request.include_traces is not None:
+        policy = policy.model_copy(update={"include_traces": request.include_traces})
     bundle = build_export(
         case,
         traces=traces,
         artifacts=workspace.artifacts,
-        include_traces=request.include_traces,
-        redact_text=request.redact_text,
+        policy=policy,
         budget=budget,
     )
     from wsp.core.json import dumps
@@ -620,14 +675,18 @@ def export_failure_case(service: Any, request: ExportFailureCaseInput, budget: B
     data = dumps(bundle).encode("utf-8")
     output = Path(request.output_path).expanduser().resolve()
     atomic_write_bytes(output, data, overwrite=request.overwrite)
+    privacy = dict(bundle.get("privacy", {}))
     return _result(
         {
             "case_id": case.case_id,
+            "case_sha256": bundle.get("case_sha256"),
             "output_path": str(output),
             "sha256": sha256_bytes(data),
             "nbytes": len(data),
             "traces_embedded": len(bundle["traces"]),
-            "redacted": request.redact_text,
+            "redacted": policy.redacted,
+            "privacy": privacy,
+            "artifact_map": bundle.get("artifact_map", {}),
         },
         warnings=bundle.get("warnings", []),
     )

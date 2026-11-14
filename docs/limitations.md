@@ -179,9 +179,16 @@ silently.
 - No LLM evaluator is included, and no hosted provider is required or contacted.
 - Failure-case export is self-contained for traces, contrast results, activation
   artifacts, and patches, but the combined bundle is not split automatically and
-  can be large. Human-authored case text is not automatically redacted.
+  can be large. Redacted exports are structural and scan-verified, but they
+  deliberately reduce replay capability and refuse linked artifacts that cannot
+  be transformed.
 - Traces store input/output text by default. Use `privacy.store_*` at collection
-  or `redact_text` at export. This is not encryption or access control.
+  or an export policy at export time. This is not encryption or access control.
+- Redaction protects content carried in fields the workbench knows about. A
+  caller who embeds a secret inside a machine-identifier field (for example a
+  dict key that looks like an identifier) must declare it through
+  `sensitive_markers`; the export is then refused rather than silently shipping
+  it. Values shorter than 8 characters are removed but are not searched for.
 - Cases link evidence; they do not prove causation. Hypotheses remain
   hypotheses.
 

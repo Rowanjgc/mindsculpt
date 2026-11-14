@@ -284,11 +284,15 @@ This is an explicit choice, not a hidden one:
 - `record_trace` accepts a `privacy` block. Setting
   `store_input_text=false` and/or `store_output_text=false` strips text before
   storage and records the reason in `unavailable`.
-- `export_trace` and `export_failure_case` accept `redact_text=true`, which
-  removes input/output/token text, prompt rendering, local model paths, and
-  tool-call arguments from embedded traces.
-- Human-authored case titles, summaries, annotations, and hypotheses are not
-  automatically redacted; exports warn about this.
+- `export_trace` and `export_failure_case` take a privacy policy. `mode:
+  "private"` is a full-fidelity scientific record; `mode: "redacted"` removes
+  input/output/token text, prompts, token ids, paths, filenames, tool calls,
+  human-authored case text, provenance notes, and nested artifact payloads. The
+  serialized export is then scanned for every removed string and refused if one
+  survives.
+- Human-authored case text **is** redacted: titles become `redacted case <id>`,
+  summaries, annotations, and hypotheses are removed, and the export records the
+  removed count and its limitations.
 - There is no encryption, access control, telemetry, upload, or retention
   daemon. Workspaces are local directories; delete or archive them explicitly.
 - No operation silently uploads prompts, activations, traces, or weights.

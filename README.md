@@ -34,10 +34,10 @@ operations exposed through Python, a CLI, and JSON tool schemas.
 
 ## What V1.1 adds: the Behavioral Observatory
 
-- **Generation traces** — a versioned `wsp.trace/1.0` record of tokens, text,
-  log-probabilities (when available), exact inputs, settings, termination,
-  timing, provenance, checksums, privacy state, and explicitly unavailable
-  fields.
+- **Generation traces** — a versioned `wsp.trace/1.1` record of tokens, text,
+  log-probabilities (when available), recorded input token ids, exact inputs,
+  settings, termination, timing, provenance, checksums, privacy state, and
+  explicitly unavailable fields.
 - **Collection** — a deterministic scripted backend and an optional local
   Hugging Face backend; imports for WSP JSON, INIF 0.1, and Inspect AI logs.
 - **Detectors** — repetition, generation termination, structured output,
@@ -51,6 +51,11 @@ operations exposed through Python, a CLI, and JSON tool schemas.
 - **Failure cases** — a local registry linking observations, controls, findings,
   contrasts, evaluations, annotations, hypotheses, activation captures, and
   patch references; self-contained export and checksum-verified reload.
+- **One export privacy policy** — private exports are full-fidelity evidence;
+  redacted exports structurally rebuild every trace, case record, and nested
+  artifact, recompute their checksums and identifiers, and then scan the
+  serialized bundle for every removed string. An export that cannot be proven
+  clean is refused, and reduced replay capability is recorded explicitly.
 
 ## Install
 

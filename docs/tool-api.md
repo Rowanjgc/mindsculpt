@@ -121,7 +121,7 @@ Full schemas are available from `wsp tools --operation <name>`.
 | `import_trace` | Import WSP JSON, INIF 0.1, or an Inspect AI log |
 | `inspect_trace` | Bounded token page and explicit provenance/privacy/unavailable fields |
 | `list_traces` | Trace index summaries |
-| `export_trace` | Export WSP or INIF JSON, optionally redacted |
+| `export_trace` | Export WSP or INIF JSON under an explicit privacy policy |
 | `scan_trace` | Run deterministic detectors over one trace |
 | `list_detectors` | Detector registry, parameter schemas, limitations |
 | `compare_traces` | Structural comparison without judgement |
@@ -132,7 +132,7 @@ Full schemas are available from `wsp tools --operation <name>`.
 | `inspect_failure_case` | Load a case and checksum |
 | `list_failure_cases` | Filter cases by review status or tag |
 | `update_failure_case` | Update review state, annotations, hypotheses |
-| `export_failure_case` | Write a self-contained case bundle |
+| `export_failure_case` | Write a self-contained case bundle under an explicit privacy policy |
 | `import_failure_case` | Verify and reload a bundle |
 
 A scripted trace can be recorded directly from the CLI:

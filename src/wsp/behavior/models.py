@@ -67,8 +67,18 @@ class TokenizerRef(StrictModel):
     fingerprint: str | None = None
 
 
+TokenEncoding = Literal["chat_template", "text", "unknown"]
+
+
 class InputRef(StrictModel):
-    """The exact input, or a reference to it when text is not persisted."""
+    """The exact input, or a reference to it when text is not persisted.
+
+    ``token_ids`` records the tokens that were actually presented to the model,
+    in order.  It is the only representation replay trusts: text can be
+    re-rendered differently by a changing tokenizer or chat template, token
+    identifiers cannot.  ``tokens_sha256`` hashes the canonical JSON encoding of
+    the identifier list so a reader can detect substitution without decoding it.
+    """
 
     text: str | None = None
     system: str | None = None
@@ -76,12 +86,31 @@ class InputRef(StrictModel):
     artifact_id: str | None = None
     sha256: str | None = None
     media_type: str = "text/plain"
+    token_ids: list[int] | None = None
+    tokens_sha256: str | None = None
+    token_encoding: TokenEncoding | None = None
+    #: True when the token list begins with a BOS/special token the tokenizer
+    #: added, False when it does not, None when the backend did not record it.
+    add_special_tokens: bool | None = None
+
+    @model_validator(mode="after")
+    def _token_ids(self) -> "InputRef":
+        if self.token_ids is not None:
+            if not self.token_ids:
+                raise ValueError("input.token_ids must be a non-empty list when present")
+            if any(isinstance(item, bool) or item < 0 for item in self.token_ids):
+                raise ValueError("input.token_ids must contain non-negative integers")
+            if len(set(self.token_ids)) == 0:  # pragma: no cover - defensive
+                raise ValueError("input.token_ids must not be empty")
+        return self
 
 
 class PromptInfo(StrictModel):
     template_name: str | None = None
     template_sha256: str | None = None
     rendered: str | None = None
+    #: Whether the rendered prompt ended with a generation prefix.
+    add_generation_prompt: bool | None = None
 
 
 class BackendRef(StrictModel):
@@ -201,7 +230,7 @@ class GenerationTrace(StrictModel):
     neither form is ever filled with a guessed value.
     """
 
-    schema_version: str = "wsp.trace/1.0"
+    schema_version: str = "wsp.trace/1.1"
     trace_id: str = Field(pattern=r"^tr_[0-9a-f]{16}$")
     created_at: str
     model: ModelRef = Field(default_factory=ModelRef)
@@ -587,6 +616,33 @@ class ContrastReference(StrictModel):
     overall_status: EvaluationStatus | None = None
 
 
+class RedactionRecord(StrictModel):
+    """What an export policy removed from a case and what that costs a reader.
+
+    A redacted case is not a smaller copy of the original; it is a different
+    artifact with reduced replay capability.  This record states the reduction
+    explicitly instead of letting a reader assume the export is complete.
+    """
+
+    schema_version: str = "wsp.redaction/1.0"
+    mode: Literal["redacted"] = "redacted"
+    applied_at: str
+    #: The policy without ``sensitive_markers``: needles are not persisted.
+    policy: dict[str, Any] = Field(default_factory=dict)
+    removed_fields: int = Field(default=0, ge=0)
+    removed_strings: int = Field(default=0, ge=0)
+    checksums_dropped: list[str] = Field(default_factory=list)
+    token_ids_retained: bool = False
+    #: ``unavailable`` means recorded token identifiers were removed; ``reduced``
+    #: means identifiers survive but text-derived fields do not.
+    replay_capability: Literal["unavailable", "reduced"] = "unavailable"
+    #: Original artifact id -> redacted artifact id (``None`` when omitted).
+    artifact_map: dict[str, str | None] = Field(default_factory=dict)
+    limitations: list[str] = Field(default_factory=list)
+    leak_scan: Literal["clean", "not_run"] = "not_run"
+    notes: list[str] = Field(default_factory=list)
+
+
 class FailureCase(StrictModel):
     schema_version: str = "wsp.case/1.0"
     case_id: str = Field(pattern=r"^case_[0-9a-f]{16}$")
@@ -611,6 +667,8 @@ class FailureCase(StrictModel):
     tags: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
+    #: Present only on a case that was produced by a redacting export.
+    redaction: RedactionRecord | None = None
 
     @model_validator(mode="after")
     def _coherent(self) -> "FailureCase":

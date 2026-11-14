@@ -392,6 +392,16 @@ def export_case(
     output: Path = typer.Option(..., "--output"),
     include_traces: bool = typer.Option(True, "--traces/--no-traces"),
     redact: bool = typer.Option(False, "--redact"),
+    sensitive_marker: list[str] = typer.Option(
+        [],
+        "--sensitive-marker",
+        help="Extra literal string that must not appear in the export (repeatable).",
+    ),
+    keep_token_ids: bool = typer.Option(
+        False,
+        "--keep-token-ids",
+        help="Redacted exports keep token ids, enabling reduced replay capability.",
+    ),
     overwrite: bool = typer.Option(False, "--overwrite"),
 ) -> None:
     """Write a self-contained case export bundle."""
@@ -402,8 +412,12 @@ def export_case(
             "case_id": case_id,
             "output_path": str(output),
             "include_traces": include_traces,
-            "redact_text": redact,
             "overwrite": overwrite,
+            "policy": {
+                "mode": "redacted" if redact else "private",
+                "sensitive_markers": list(sensitive_marker),
+                "keep_token_ids": keep_token_ids,
+            },
         },
     )
     _emit(envelope, exit_code=0 if envelope.get("ok") else 1)

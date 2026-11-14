@@ -167,7 +167,7 @@ All schemas are versioned and JSON-compatible.
 | `wsp.run/1.0` | Reproduction/run record |
 | `wsp.workspace/1.0` | Workspace configuration |
 | `wsp.experiment/1.0` | Named experiment grouping runs |
-| `wsp.trace/1.0` | One generation observation |
+| `wsp.trace/1.1` | One generation observation (1.0 traces still validate) |
 | `wsp.trace-index/1.0` | Index entry pointing at an immutable trace artifact |
 | `wsp.finding/1.0` | One detector measurement/finding |
 | `wsp.scan/1.0` | Detector runs for one trace |
@@ -176,7 +176,9 @@ All schemas are versioned and JSON-compatible.
 | `wsp.contrast-result/1.0` | Executed comparison, outcomes, and evaluations |
 | `wsp.trace-comparison/1.0` | Structural trace comparison |
 | `wsp.case/1.0` | Persistent investigation case |
-| `wsp.case-export/1.0` | Self-contained case bundle |
+| `wsp.case-export/1.1` | Self-contained case bundle with privacy metadata |
+| `wsp.export-policy/1.0` | Export privacy policy and its declared limitations |
+| `wsp.redaction/1.0` | Record of what a redacted export removed |
 
 ### Workspace layout
 

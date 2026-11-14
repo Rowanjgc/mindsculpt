@@ -129,7 +129,7 @@ def test_offline_behavioral_workflow_end_to_end(service, workspace: Workspace, t
         {"case_id": case["case_id"], "output_path": str(out)},
     )
     bundle = json.loads(out.read_text(encoding="utf-8"))
-    assert bundle["schema_version"] == "wsp.case-export/1.0"
+    assert bundle["schema_version"] == "wsp.case-export/1.1"
     assert len(bundle["traces"]) == 2
     assert bundle["traces"][0]["trace"]["trace_id"] in {looping, healthy}
 

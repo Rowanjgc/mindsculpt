@@ -1,4 +1,23 @@
-"""Persistent failure-case registry and self-contained export bundles."""
+"""Persistent failure-case registry and self-contained export bundles.
+
+Export bundles have two modes, and the difference is a property of the archive
+rather than a promise about the code path:
+
+``private``
+    The bundle embeds the exact traces, contrast results, measurements, and
+    notes that were recorded.  Nested artifacts are embedded byte-for-byte, so
+    their content identifiers survive a round trip unchanged.
+
+``redacted``
+    Every free-form string is replaced through
+    :mod:`wsp.behavior.redaction`, linked artifacts are transformed (and get new
+    content identifiers), all references are rewritten to point at the
+    transformed artifacts, and the finished archive is scanned for every string
+    the policy removed.  A surviving string aborts the export.
+
+An artifact with no safe transformation aborts a redacted export unless the
+caller explicitly accepts omission, in which case the case says so.
+"""
 
 from __future__ import annotations
 
@@ -6,13 +25,22 @@ import base64
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from wsp.behavior.ids import new_case_id
 from wsp.behavior.models import (
     CaseSummary,
     FailureCase,
     GenerationTrace,
+)
+from wsp.behavior.redaction import (
+    ArtifactRewrite,
+    RedactedCase,
+    collect_artifact_ids,
+    dropped_trace_checksums,
+    redact_case,
+    redact_trace_payload,
+    rewrite_artifact_ids,
 )
 from wsp.behavior.trace import TraceStore
 from wsp.core.budget import Budget, enforce_bytes
@@ -21,10 +49,22 @@ from wsp.core.hashing import sha256_bytes
 from wsp.core.json import atomic_write_bytes, canonical_bytes, dumps, read_json, to_jsonable
 from wsp.core.time import utc_now_iso
 from wsp.patches.spec import PatchSet, WeightPatch
+from wsp.workspace.privacy import (
+    ExportPolicy,
+    RemovedText,
+    base64_payload,
+    content_id,
+    enforce_no_leaks,
+    safe_display_name,
+    scrub_provenance,
+    transform_artifact,
+)
 from wsp.workspace.store import Workspace
 
 CASE_ID_PATTERN = re.compile(r"^case_[0-9a-f]{16}$")
-EXPORT_SCHEMA = "wsp.case-export/1.0"
+EXPORT_SCHEMA = "wsp.case-export/1.1"
+LEGACY_EXPORT_SCHEMA = "wsp.case-export/1.0"
+SUPPORTED_EXPORT_SCHEMAS = (EXPORT_SCHEMA, LEGACY_EXPORT_SCHEMA)
 
 
 def new_case_identifier() -> str:
@@ -153,176 +193,393 @@ class CaseStore:
         return summaries[:limit]
 
 
+# --------------------------------------------------------------------------- #
+# trace redaction (standalone export path)
+# --------------------------------------------------------------------------- #
+
+
 def redact_trace(trace: GenerationTrace) -> GenerationTrace:
-    stripped = trace.model_copy(deep=True)
-    stripped.input.text = None
-    stripped.input.messages = []
-    stripped.input.sha256 = None
-    stripped.text = None
-    if stripped.prompt is not None:
-        stripped.prompt.rendered = None
-    for token in stripped.tokens:
-        token.text = None
-    for call in stripped.tool_calls:
-        call.arguments = None
-    stripped.model.checkpoint_path = None
-    stripped.provenance.source_ref = None
-    stripped.privacy.store_input_text = False
-    stripped.privacy.store_output_text = False
-    stripped.privacy.redacted = True
-    stripped.unavailable.setdefault("input_text", "removed by export redaction")
-    stripped.unavailable.setdefault("output_text", "removed by export redaction")
-    return stripped
+    """Return a redacted trace for a standalone trace export.
+
+    Kept for the ``export_trace`` tool, which writes one trace and not a case.
+    The transformation is the same one the case exporter uses; there is only one
+    redaction implementation.
+    """
+
+    policy = ExportPolicy(mode="redacted")
+    removed = RemovedText()
+    payload = redact_trace_payload(
+        trace.model_dump(mode="json"),
+        policy,
+        removed,
+        keep_artifact_refs=False,
+    )
+    return GenerationTrace.model_validate(payload)
 
 
-def _collect_artifact_ids(value: Any) -> set[str]:
-    found: set[str] = set()
-    if isinstance(value, dict):
-        artifact_id = value.get("artifact_id")
-        if isinstance(artifact_id, str) and artifact_id.startswith("a_"):
-            found.add(artifact_id)
-        for item in value.values():
-            found.update(_collect_artifact_ids(item))
-    elif isinstance(value, list):
-        for item in value:
-            found.update(_collect_artifact_ids(item))
-    return found
+# --------------------------------------------------------------------------- #
+# export
+# --------------------------------------------------------------------------- #
+
+
+def _artifact_entry(
+    rewrite: ArtifactRewrite,
+    *,
+    removed: RemovedText,
+) -> dict[str, Any] | None:
+    if rewrite.ref is None or rewrite.data is None:
+        return None
+    entry: dict[str, Any] = {
+        "artifact_id": write_id(rewrite.data),
+        "kind": rewrite.kind,
+        "format": rewrite.format,
+        "sha256": rewrite.ref["sha256"],
+        "nbytes": rewrite.ref["nbytes"],
+        "data_base64": base64_payload(rewrite.data),
+    }
+    if rewrite.old_id != entry["artifact_id"]:
+        entry["old_artifact_id"] = rewrite.old_id
+    if rewrite.format == "json":
+        try:
+            entry["payload"] = json.loads(rewrite.data.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:  # pragma: no cover
+            raise SafetyError("a transformed JSON artifact is not valid JSON") from exc
+    return entry
+
+
+def write_id(data: bytes) -> str:
+    return content_id(data)
+
+
+def _patch_payload_scrub(
+    payload: dict[str, Any],
+    policy: ExportPolicy,
+    removed: RemovedText,
+) -> dict[str, Any]:
+    """Scrub a weight-patch payload without changing its identifier.
+
+    ``patch_id`` is derived from the source fingerprint, target, selection, and
+    operation parameters, not from provenance, so removing author notes is safe.
+    """
+
+    if not policy.redacted:
+        return payload
+    payload = dict(payload)
+    payload["provenance"] = scrub_provenance(payload.get("provenance"), removed)
+    source = payload.get("source")
+    if isinstance(source, dict):
+        source = dict(source)
+        source["display_name"] = safe_display_name(source.get("display_name"), removed)
+        source["metadata"] = removed.scrub_soft(source.get("metadata"))
+        payload["source"] = source
+    # ``target`` (a checkpoint tensor name) is structural and must survive:
+    # the patch cannot be reapplied without it.
+    return payload
+
+
+def _patch_set_payload_scrub(
+    payload: dict[str, Any],
+    policy: ExportPolicy,
+    removed: RemovedText,
+) -> dict[str, Any]:
+    if not policy.redacted:
+        return payload
+    payload = dict(payload)
+    removed.take(payload.get("name"))
+    payload["name"] = None
+    removed.take(payload.get("notes"))
+    payload["notes"] = None
+    removed.take(payload.get("created_by"))
+    payload["created_by"] = None
+    if isinstance(payload.get("metadata"), dict):
+        payload["metadata"] = removed.scrub_soft(payload["metadata"])
+    return payload
 
 
 def build_export(
     case: FailureCase,
     *,
     traces: TraceStore,
-    artifacts: Any,
+    artifacts: Any = None,
+    policy: ExportPolicy | None = None,
     include_traces: bool = True,
-    redact_text: bool = False,
+    redact_text: bool | None = None,
     budget: Budget | None = None,
 ) -> dict[str, Any]:
     budget = budget or traces.budget
+    artifacts = artifacts if artifacts is not None else traces.workspace.artifacts
+    if policy is None:
+        policy = ExportPolicy(mode="redacted" if redact_text else "private")
+    elif redact_text is not None and bool(redact_text) != policy.redacted:
+        raise InputError(
+            "redact_text and policy.mode disagree",
+            details={"redact_text": redact_text, "mode": policy.mode},
+        )
+    include_traces = include_traces and policy.include_traces
+
     warnings: list[str] = []
+    removed = RemovedText()
+    limitations: list[str] = []
+    checksums_dropped: list[str] = []
+
+    if policy.redacted:
+        redacted: RedactedCase = redact_case(
+            case.model_dump(mode="json"),
+            policy=policy,
+            artifacts=artifacts,
+        )
+        case_payload = redacted.payload
+        removed = redacted.removed
+        limitations = list(redacted.limitations)
+        rewrites: dict[str, ArtifactRewrite] = {
+            rewrite.old_id: rewrite for rewrite in redacted.artifacts
+        }
+    else:
+        case_payload = case.model_dump(mode="json")
+        rewrites = {}
+
     embedded_traces: list[dict[str, Any]] = []
     if include_traces:
         for trace_id in case.observations + case.controls:
             record = traces.get_record(trace_id)
             trace = traces.load(trace_id)
             payload = trace.model_dump(mode="json")
-            if redact_text:
-                payload = redact_trace(trace).model_dump(mode="json")
+            if policy.redacted:
+                checksums_dropped.extend(
+                    f"trace:{trace_id}:{name}" for name in dropped_trace_checksums(payload)
+                )
+                payload = redact_trace_payload(
+                    payload,
+                    policy,
+                    removed,
+                    keep_artifact_refs=False,
+                )
+                data = canonical_bytes(payload)
+                artifact_id = content_id(data)
+                artifact_sha = sha256_bytes(data)
+            else:
+                artifact_id = record.artifact.artifact_id
+                artifact_sha = record.artifact.sha256
             embedded_traces.append(
                 {
                     "trace_id": trace_id,
-                    "artifact_id": record.artifact.artifact_id,
-                    "artifact_sha256": record.artifact.sha256,
-                    "redacted": redact_text,
+                    "artifact_id": artifact_id,
+                    "artifact_sha256": artifact_sha,
+                    "redacted": policy.redacted,
                     "trace": payload,
                 }
             )
     else:
         warnings.append("trace payloads were not included")
-    if redact_text:
-        warnings.append(
-            "case titles, summaries, annotations, and hypotheses are human-authored and were not redacted"
-        )
-        warnings.append(
-            "case model/reproduction metadata is reduced, but embedded contrast results "
-            "retain their exact inputs and outputs; review them before sharing"
-        )
 
-    case_payload = case.model_dump(mode="json")
-    if redact_text:
-        if isinstance(case_payload.get("model"), dict):
-            case_payload["model"]["checkpoint_path"] = None
-        if isinstance(case_payload.get("reproduction"), dict):
-            case_payload["reproduction"]["environment"] = {}
-    exported_case_sha = sha256_bytes(canonical_bytes(case_payload))
-
-    contrasts: list[dict[str, Any]] = []
-    for reference in case.contrasts:
-        if reference.artifact_id is None:
-            continue
-        ref, _path = artifacts.get(reference.artifact_id)
-        contrasts.append(
-            {
-                "artifact_id": ref.artifact_id,
-                "sha256": ref.sha256,
-                "nbytes": ref.nbytes,
-                "payload": artifacts.read_json(ref.artifact_id),
-            }
-        )
-
-    activation_payloads: list[dict[str, Any]] = []
-    for artifact in case.activation_captures:
-        ref, path = artifacts.get(artifact.artifact_id)
-        data = path.read_bytes()
-        activation_payloads.append(
-            {
-                "artifact_id": ref.artifact_id,
-                "kind": ref.kind,
-                "format": ref.format,
-                "sha256": ref.sha256,
-                "nbytes": ref.nbytes,
-                "data_base64": base64.b64encode(data).decode("ascii"),
-            }
-        )
     patch_payloads: list[dict[str, Any]] = []
     patch_artifact_ids: set[str] = set()
     for reference in case.patches:
         if reference.patch_id is not None:
             patch = traces.workspace.load_patch(reference.patch_id)
             payload = patch.model_dump(mode="json")
-            patch_artifact_ids.update(_collect_artifact_ids(payload))
+            patch_artifact_ids.update(collect_artifact_ids(payload))
             patch_payloads.append(
-                {"kind": "patch", "patch_id": patch.patch_id, "payload": payload}
+                {
+                    "kind": "patch",
+                    "patch_id": patch.patch_id,
+                    "payload": _patch_payload_scrub(payload, policy, removed),
+                    "redacted": policy.redacted,
+                }
             )
         elif reference.patchset_id is not None:
             patchset = traces.workspace.load_patchset(reference.patchset_id)
             payload = patchset.model_dump(mode="json")
-            patch_artifact_ids.update(_collect_artifact_ids(payload))
+            patch_artifact_ids.update(collect_artifact_ids(payload))
             patch_payloads.append(
                 {
                     "kind": "patchset",
                     "patchset_id": patchset.patchset_id,
-                    "payload": payload,
+                    "payload": _patch_set_payload_scrub(payload, policy, removed),
+                    "redacted": policy.redacted,
                 }
             )
-    patch_artifacts: list[dict[str, Any]] = []
-    for artifact_id in sorted(patch_artifact_ids):
-        ref, path = artifacts.get(artifact_id)
-        data = path.read_bytes()
-        patch_artifacts.append(
-            {
-                "artifact_id": ref.artifact_id,
-                "kind": ref.kind,
-                "format": ref.format,
-                "sha256": ref.sha256,
-                "nbytes": ref.nbytes,
-                "data_base64": base64.b64encode(data).decode("ascii"),
-            }
+
+    needed_ids = collect_artifact_ids(case.model_dump(mode="json")) | patch_artifact_ids
+    missing = sorted(needed_ids - set(rewrites))
+    if missing:
+        if policy.redacted:
+            rewrites.update(
+                rewrite_artifact_ids(
+                    missing,
+                    policy=policy,
+                    artifacts=artifacts,
+                    removed=removed,
+                    limitations=limitations,
+                )
+            )
+        else:
+            for artifact_id in missing:
+                ref, path = artifacts.get(artifact_id)
+                data = path.read_bytes()
+                rewrites[artifact_id] = ArtifactRewrite(
+                    old_id=artifact_id,
+                    ref={
+                        "artifact_id": ref.artifact_id,
+                        "kind": ref.kind,
+                        "format": ref.format,
+                        "sha256": ref.sha256,
+                        "nbytes": ref.nbytes,
+                        "path": ref.path,
+                    },
+                    kind=ref.kind,
+                    format=ref.format,
+                    data=data,
+                )
+
+    entries: dict[str, dict[str, Any]] = {}
+    for old_id, rewrite in rewrites.items():
+        entry = _artifact_entry(rewrite, removed=removed)
+        if entry is not None:
+            entries[old_id] = entry
+
+    def entries_for(artifact_ids: Iterable[str]) -> list[dict[str, Any]]:
+        return [entries[item] for item in artifact_ids if item in entries]
+
+    contrast_ids = [
+        reference.artifact_id
+        for reference in case.contrasts
+        if reference.artifact_id is not None
+    ]
+    activation_ids = [artifact.artifact_id for artifact in case.activation_captures]
+    contrast_entries = entries_for(contrast_ids)
+    activation_entries = entries_for(activation_ids)
+
+    if policy.redacted:
+        case_payload["redaction"]["checksums_dropped"] = sorted(set(checksums_dropped))
+        limitations.extend(
+            f"linked artifact {item.old_id} was omitted" for item in rewrites.values() if item.omitted
         )
 
-    bundle = {
+    exported_case_sha = sha256_bytes(canonical_bytes(case_payload))
+
+    artifact_map = (
+        {
+            old_id: (rewrite.ref["artifact_id"] if rewrite.ref else None)
+            for old_id, rewrite in sorted(rewrites.items())
+        }
+        if policy.redacted
+        else {}
+    )
+
+    reference_traces = [
+        item["trace_id"] for item in embedded_traces
+    ] or (case.observations + case.controls)
+
+    bundle: dict[str, Any] = {
         "schema_version": EXPORT_SCHEMA,
         "exported_at": utc_now_iso(),
         "case_sha256": exported_case_sha,
         "case": case_payload,
+        "privacy": {
+            "mode": policy.mode,
+            "policy": _policy_payload(policy),
+            "limitations": limitations,
+            "removed_fields": len(removed),
+            "removed_strings": len(removed.values),
+            "checksums_dropped": sorted(set(checksums_dropped)),
+            "replay_capability": (
+                ("reduced" if policy.keep_token_ids else "unavailable")
+                if policy.redacted
+                else "full"
+            ),
+            "leak_scan": "clean",
+        },
         "traces": embedded_traces,
-        "contrast_results": contrasts,
-        "activation_captures": activation_payloads,
+        "contrast_results": contrast_entries,
+        "activation_captures": activation_entries,
         "patches": patch_payloads,
-        "payload_artifacts": patch_artifacts,
+        "payload_artifacts": entries_for(sorted(patch_artifact_ids)),
+        "artifact_map": artifact_map,
         "references": {
-            "traces": case.observations + case.controls,
-            "contrast_artifact_ids": [item["artifact_id"] for item in contrasts],
+            "traces": reference_traces,
+            "contrast_artifact_ids": [item["artifact_id"] for item in contrast_entries],
             "activation_capture_artifact_ids": [
-                artifact.artifact_id for artifact in case.activation_captures
+                item["artifact_id"] for item in activation_entries
             ],
-            "patches": [reference.model_dump(mode="json") for reference in case.patches],
+            "patches": list(case_payload.get("patches") or []),
         },
         "warnings": warnings,
     }
+    if policy.redacted:
+        bundle["warnings"] = warnings + [
+            "this is a redacted export: text, notes, and measurement payloads were removed",
+            "replay capability is reduced; see privacy.limitations",
+        ]
+
     encoded = dumps(to_jsonable(bundle))
+    needles = list(removed.values) + list(policy.sensitive_markers)
+    enforce_no_leaks(encoded, needles, what=f"{policy.mode} case export")
     enforce_bytes(len(encoded), budget.max_artifact_bytes, what="case export")
     return bundle
+
+
+def _policy_payload(policy: ExportPolicy) -> dict[str, Any]:
+    payload = policy.model_dump(mode="json")
+    payload.pop("sensitive_markers", None)
+    return payload
+
+
+# --------------------------------------------------------------------------- #
+# import
+# --------------------------------------------------------------------------- #
+
+
+def _decode_entry(entry: dict[str, Any], what: str) -> tuple[str, bytes, str]:
+    if isinstance(entry.get("data_base64"), str):
+        try:
+            data = base64.b64decode(entry["data_base64"], validate=True)
+        except Exception as exc:
+            raise InputError(f"{what} is not valid base64: {exc}") from exc
+        return str(entry.get("kind", what)), data, str(entry.get("format", "bin"))
+    if "payload" in entry:
+        payload = entry["payload"]
+        data = canonical_bytes(payload)
+        return str(entry.get("kind", what)), data, "json"
+    raise InputError(f"case export contains a malformed {what}")
+
+
+def _import_artifacts(
+    payload: dict[str, Any],
+    *,
+    traces: TraceStore,
+    warnings: list[str],
+    check_ids: bool,
+) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    for section, default_kind in (
+        ("contrast_results", "contrast_result"),
+        ("activation_captures", "activation_capture"),
+        ("payload_artifacts", "patch_payload"),
+    ):
+        for entry in payload.get(section, []) or []:
+            if not isinstance(entry, dict):
+                raise InputError(f"case export contains a malformed {section} entry")
+            kind, data, format_name = _decode_entry(entry, default_kind)
+            ref = traces.workspace.artifacts.put_bytes(kind, data, format=format_name)
+            recorded = entry.get("artifact_id")
+            if recorded not in (None, ref.artifact_id):
+                if not check_ids:
+                    warnings.append(
+                        f"{section} entry was re-identified on import "
+                        f"({recorded} -> {ref.artifact_id})"
+                    )
+                else:
+                    raise ArtifactError(
+                        f"{section} content hash does not match its exported identifier",
+                        details={"recorded": recorded, "actual": ref.artifact_id},
+                    )
+            if entry.get("sha256") not in (None, ref.sha256):
+                raise ArtifactError(f"{section} checksum does not match the export")
+            old_id = entry.get("old_artifact_id")
+            if isinstance(old_id, str):
+                mapping[old_id] = ref.artifact_id
+    return mapping
 
 
 def import_export(
@@ -340,8 +597,10 @@ def import_export(
         payload = json.loads(source.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise InputError(f"could not read case export: {exc}") from exc
-    if not isinstance(payload, dict) or payload.get("schema_version") != EXPORT_SCHEMA:
+    if not isinstance(payload, dict) or payload.get("schema_version") not in SUPPORTED_EXPORT_SCHEMAS:
         raise InputError("file is not a supported case export")
+    schema = payload["schema_version"]
+    modern = schema == EXPORT_SCHEMA
     case_payload = payload.get("case")
     recorded_sha = payload.get("case_sha256")
     if not isinstance(case_payload, dict) or not isinstance(recorded_sha, str):
@@ -353,6 +612,7 @@ def import_export(
     except Exception as exc:
         raise InputError(f"exported case is not valid: {exc}") from exc
     warnings: list[str] = []
+
     for entry in payload.get("traces", []) or []:
         if not isinstance(entry, dict) or not isinstance(entry.get("trace"), dict):
             raise InputError("case export contains a malformed trace entry")
@@ -362,16 +622,22 @@ def import_export(
             raise InputError(f"exported trace is not valid: {exc}") from exc
         if trace.trace_id != entry.get("trace_id"):
             raise ArtifactError("exported trace identifier does not match its entry")
-        if not entry.get("redacted"):
-            expected = entry.get("artifact_sha256")
-            actual = sha256_bytes(canonical_bytes(trace.model_dump(mode="json")))
-            if expected and expected != actual:
-                raise ArtifactError(
-                    "exported trace checksum does not match its payload",
-                    details={"trace_id": trace.trace_id},
-                )
-        else:
-            warnings.append(f"trace {trace.trace_id} was redacted in the export")
+        expected = entry.get("artifact_sha256")
+        actual = sha256_bytes(canonical_bytes(trace.model_dump(mode="json")))
+        if modern and expected and expected != actual:
+            raise ArtifactError(
+                "exported trace checksum does not match its payload",
+                details={"trace_id": trace.trace_id},
+            )
+        if not modern and not entry.get("redacted") and expected and expected != actual:
+            raise ArtifactError(
+                "exported trace checksum does not match its payload",
+                details={"trace_id": trace.trace_id},
+            )
+        if entry.get("redacted"):
+            warnings.append(
+                f"trace {trace.trace_id} was redacted; replay capability is reduced"
+            )
         existing = None
         try:
             existing = traces.get_record(trace.trace_id)
@@ -382,52 +648,39 @@ def import_export(
             if canonical_bytes(current.model_dump(mode="json")) != canonical_bytes(
                 trace.model_dump(mode="json")
             ):
+                if entry.get("redacted"):
+                    warnings.append(
+                        f"workspace already holds trace {trace.trace_id}; "
+                        "the redacted copy was not imported and the existing trace is kept"
+                    )
+                    continue
                 raise ArtifactError(
                     "workspace already contains a different trace with this identifier",
                     details={"trace_id": trace.trace_id},
                 )
             continue
         traces.save(trace)
-    for entry in payload.get("contrast_results", []) or []:
-        if not isinstance(entry, dict) or not isinstance(entry.get("payload"), (dict, list)):
-            raise InputError("case export contains a malformed contrast result")
-        ref = traces.workspace.artifacts.put_json("contrast_result", entry["payload"])
-        if entry.get("artifact_id") not in (None, ref.artifact_id):
-            raise ArtifactError("contrast result content hash does not match its exported identifier")
-        if entry.get("sha256") not in (None, ref.sha256):
-            raise ArtifactError("contrast result checksum does not match the export")
-    for entry in payload.get("activation_captures", []) or []:
-        if not isinstance(entry, dict) or not isinstance(entry.get("data_base64"), str):
-            raise InputError("case export contains a malformed activation capture")
-        try:
-            data = base64.b64decode(entry["data_base64"], validate=True)
-        except Exception as exc:
-            raise InputError(f"activation capture is not valid base64: {exc}") from exc
-        ref = traces.workspace.artifacts.put_bytes(
-            str(entry.get("kind", "activation_capture")),
-            data,
-            format=str(entry.get("format", "json")),
-        )
-        if entry.get("artifact_id") not in (None, ref.artifact_id):
-            raise ArtifactError("activation capture content hash does not match its exported identifier")
-        if entry.get("sha256") not in (None, ref.sha256):
-            raise ArtifactError("activation capture checksum does not match the export")
-    for entry in payload.get("payload_artifacts", []) or []:
-        if not isinstance(entry, dict) or not isinstance(entry.get("data_base64"), str):
-            raise InputError("case export contains a malformed patch payload artifact")
-        try:
-            data = base64.b64decode(entry["data_base64"], validate=True)
-        except Exception as exc:
-            raise InputError(f"patch payload artifact is not valid base64: {exc}") from exc
-        ref = traces.workspace.artifacts.put_bytes(
-            str(entry.get("kind", "patch_payload")),
-            data,
-            format=str(entry.get("format", "npy")),
-        )
-        if entry.get("artifact_id") not in (None, ref.artifact_id):
-            raise ArtifactError("patch payload content hash does not match its exported identifier")
-        if entry.get("sha256") not in (None, ref.sha256):
-            raise ArtifactError("patch payload checksum does not match the export")
+
+    _import_artifacts(
+        payload,
+        traces=traces,
+        warnings=warnings,
+        check_ids=modern,
+    )
+
+    reference_map = payload.get("artifact_map")
+    if isinstance(reference_map, dict):
+        for old_id, new_id in reference_map.items():
+            if new_id is None:
+                continue
+            try:
+                traces.workspace.artifacts.get(new_id)
+            except NotFoundError as exc:
+                raise ArtifactError(
+                    "exported artifact map points at content that is not in the archive",
+                    details={"artifact_id": new_id},
+                ) from exc
+
     for entry in payload.get("patches", []) or []:
         if not isinstance(entry, dict) or not isinstance(entry.get("payload"), dict):
             raise InputError("case export contains a malformed patch reference")
@@ -435,14 +688,27 @@ def import_export(
             patch = WeightPatch.model_validate(entry["payload"])
             if entry.get("patch_id") not in (None, patch.patch_id):
                 raise ArtifactError("patch identifier does not match its payload")
-            traces.workspace.save_patch(patch)
+            try:
+                traces.workspace.save_patch(patch)
+            except ArtifactError:
+                warnings.append(
+                    f"workspace already holds patch {patch.patch_id} with different metadata; "
+                    "the existing record is kept"
+                )
         elif entry.get("kind") == "patchset":
             patchset = PatchSet.model_validate(entry["payload"])
             if entry.get("patchset_id") not in (None, patchset.patchset_id):
                 raise ArtifactError("patch set identifier does not match its payload")
-            traces.workspace.save_patchset(patchset)
+            try:
+                traces.workspace.save_patchset(patchset)
+            except ArtifactError:
+                warnings.append(
+                    f"workspace already holds patch set {patchset.patchset_id} with "
+                    "different metadata; the existing record is kept"
+                )
         else:
             raise InputError("unknown patch entry kind in case export")
+
     existing_case = None
     try:
         existing_case = cases.load(case.case_id)
