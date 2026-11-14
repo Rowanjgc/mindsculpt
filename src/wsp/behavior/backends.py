@@ -22,9 +22,11 @@ from wsp.behavior.models import (
     InputRef,
     ModelRef,
     PrivacyInfo,
+    PromptInfo,
     Provenance,
     ScriptedBackendConfig,
     ScriptedFixture,
+    SyntheticBackendConfig,
     TerminationInfo,
     TimingInfo,
     TokenAlternative,
@@ -38,6 +40,28 @@ from wsp.core.errors import ExecutionError, InputError, ResourceLimitError, Unsu
 from wsp.core.hashing import sha256_bytes, sha256_file
 from wsp.core.json import canonical_bytes
 from wsp.core.time import utc_now_iso
+from wsp.execution.synthetic_lm import SYNTHETIC_BACKEND_VERSION
+
+
+def tokenizer_fingerprint(tokenizer: Any) -> str | None:
+    """Stable digest of a tokenizer's vocabulary and length policy.
+
+    Replay compares this value against the fingerprint a trace recorded.  The
+    formula is part of the artifact format: two implementations that disagree
+    would report false incompatibilities, so it lives in one place.
+    """
+
+    try:
+        return sha256_bytes(
+            canonical_bytes(
+                {
+                    "vocab": tokenizer.get_vocab(),
+                    "model_max_length": getattr(tokenizer, "model_max_length", None),
+                }
+            )
+        )
+    except Exception:
+        return None
 
 
 class GenerationRequest(Protocol):
@@ -171,6 +195,171 @@ class ScriptedBackend:
 
 
 @dataclass
+class SyntheticBackend:
+    """Deterministic offline generation from the fixture causal LM.
+
+    The point of this backend is that a recorded trace can be replayed later:
+    the model is rebuilt from its specification, so no weights need shipping and
+    no network access is required.
+    """
+
+    config: SyntheticBackendConfig
+
+    def _runtime(self) -> Any:
+        from wsp.execution.synthetic_lm import build_runtime
+
+        return build_runtime(self.config.model)
+
+    def info(self) -> BackendRef:
+        try:
+            import torch
+
+            runtime_version = str(torch.__version__)
+        except ImportError:  # pragma: no cover - torch is a core dependency
+            runtime_version = None
+        return BackendRef(
+            name="synthetic",
+            version=SYNTHETIC_BACKEND_VERSION,
+            device="cpu",
+            dtype="float32",
+            deterministic=True,
+            runtime={
+                "torch": runtime_version,
+                "model_kind": self.config.model.kind,
+                "spec_digest": self.config.model.digest(),
+            },
+        )
+
+    def generate(self, request: GenerationRequest, *, budget: Budget) -> GenerationTrace:
+        from wsp.execution.synthetic_lm import EOS_ID, build_runtime, greedy_generate
+
+        params = request.params
+        if params.do_sample or (params.temperature or 0) > 0:
+            raise UnsupportedError(
+                "the synthetic backend is greedy-only; sampling is not implemented"
+            )
+        runtime = build_runtime(self.config.model)
+        tokenizer = runtime.tokenizer
+        if request.system:
+            prompt_text = f"{request.system}\n\n{request.input_text}"
+        else:
+            prompt_text = request.input_text
+        input_ids = tokenizer.encode(prompt_text, add_special_tokens=True)
+        if len(input_ids) > budget.max_trace_input_tokens:
+            raise ResourceLimitError(
+                "prompt exceeds the configured input token limit",
+                details={"tokens": len(input_ids), "limit": budget.max_trace_input_tokens},
+            )
+        max_new = int(params.max_new_tokens)
+        started_at = utc_now_iso()
+        started = time.perf_counter()
+        generated, logprobs = greedy_generate(
+            runtime, input_ids, max_new_tokens=max_new, eos_id=EOS_ID
+        )
+        tokens: list[TokenRecord] = []
+        stop_sequence = None
+        termination = "length_limit"
+        text_parts: list[str] = []
+        for index, (token_id, logprob) in enumerate(zip(generated, logprobs)):
+            piece = tokenizer.decode([token_id], skip_special_tokens=False)
+            candidate = "".join(text_parts) + piece
+            hit = next(
+                (stop for stop in params.stop_sequences if stop and stop in candidate),
+                None,
+            )
+            if hit is not None:
+                stop_sequence = hit
+                termination = "stop_sequence"
+                trimmed = candidate.split(hit, 1)[0]
+                tokens.append(
+                    TokenRecord(token_id=token_id, text=trimmed[len("".join(text_parts)):], logprob=logprob)
+                )
+                text_parts.append(tokens[-1].text or "")
+                break
+            text_parts.append(piece)
+            tokens.append(TokenRecord(token_id=token_id, text=piece, logprob=logprob))
+            if token_id == EOS_ID:
+                termination = "eos"
+                break
+        text = tokenizer.decode(
+            [token.token_id for token in tokens if token.token_id is not None],
+            skip_special_tokens=True,
+        )
+        if stop_sequence is not None:
+            text = text.split(stop_sequence, 1)[0]
+        if len(text) > budget.max_trace_chars:
+            raise ResourceLimitError(
+                "synthetic output exceeds the configured character limit",
+                details={"characters": len(text), "limit": budget.max_trace_chars},
+            )
+        duration_ms = max(0.0, (time.perf_counter() - started) * 1000.0)
+        trace = GenerationTrace(
+            trace_id=new_trace_id(),
+            created_at=started_at,
+            model=ModelRef(
+                name=self.config.name,
+                parameter_count=runtime.parameter_count(),
+                structure_fingerprint=runtime.structure_fingerprint(),
+                metadata={
+                    "architectures": [type(runtime.model).__name__],
+                    "synthetic_spec": self.config.model.model_dump(mode="json"),
+                    "synthetic_spec_digest": self.config.model.digest(),
+                },
+            ),
+            tokenizer=TokenizerRef(
+                name=tokenizer.name,
+                kind=type(tokenizer).__name__,
+                vocab_size=tokenizer.vocab_size,
+                fingerprint=tokenizer_fingerprint(tokenizer),
+            ),
+            input=InputRef(
+                text=request.input_text,
+                system=request.system,
+                messages=(
+                    [ChatMessage(role="user", content=request.input_text)]
+                    if request.system is None
+                    else [
+                        ChatMessage(role="system", content=request.system),
+                        ChatMessage(role="user", content=request.input_text),
+                    ]
+                ),
+                token_ids=list(input_ids),
+                token_encoding="text",
+                add_special_tokens=True,
+            ),
+            backend=self.info(),
+            params=params,
+            seed=request.seed,
+            tokens=tokens,
+            text=text,
+            termination=TerminationInfo(
+                reason=termination,
+                detail=None,
+                stop_sequence=stop_sequence,
+                generated_tokens=len(tokens),
+            ),
+            timing=TimingInfo(
+                started_at=started_at,
+                completed_at=utc_now_iso(),
+                duration_ms=duration_ms,
+                tokens_per_second=(
+                    len(tokens) / (duration_ms / 1000.0)
+                    if tokens and duration_ms > 0
+                    else None
+                ),
+            ),
+            provenance=Provenance(
+                origin="generated",
+                source_system="wsp.behavior.synthetic",
+                source_version=SYNTHETIC_BACKEND_VERSION,
+                notes="generated by the offline fixture causal LM",
+            ),
+            privacy=PrivacyInfo(store_input_text=True, store_output_text=True),
+        )
+        return finalize_trace(trace, budget)
+
+
+@dataclass
 class HuggingFaceBackend:
     """Optional local causal-LM generation with token-level observations."""
 
@@ -213,25 +402,13 @@ class HuggingFaceBackend:
         )
 
     def _tokenizer_ref(self, tokenizer: Any) -> TokenizerRef:
-        fingerprint = None
-        try:
-            fingerprint = sha256_bytes(
-                canonical_bytes(
-                    {
-                        "vocab": tokenizer.get_vocab(),
-                        "model_max_length": getattr(tokenizer, "model_max_length", None),
-                    }
-                )
-            )
-        except Exception:
-            fingerprint = None
         init_kwargs = getattr(tokenizer, "init_kwargs", {}) or {}
         return TokenizerRef(
             name=getattr(tokenizer, "name_or_path", None) or self.config.tokenizer_path,
             revision=init_kwargs.get("_commit_hash"),
             kind=type(tokenizer).__name__,
             vocab_size=getattr(tokenizer, "vocab_size", None),
-            fingerprint=fingerprint,
+            fingerprint=tokenizer_fingerprint(tokenizer),
         )
 
     def _model_ref(self, model: Any, tokenizer: Any) -> ModelRef:
@@ -262,18 +439,37 @@ class HuggingFaceBackend:
         messages.append({"role": "user", "content": request.input_text})
         template = getattr(tokenizer, "chat_template", None)
         if template:
-            return tokenizer.apply_chat_template(
+            encoded = tokenizer.apply_chat_template(
                 messages,
                 add_generation_prompt=True,
                 return_tensors="pt",
                 return_dict=True,
             )
+            try:
+                rendered = tokenizer.apply_chat_template(
+                    messages, add_generation_prompt=True, tokenize=False
+                )
+            except Exception:  # pragma: no cover - tokenizer-specific
+                rendered = None
+            prompt = PromptInfo(
+                template_name="tokenizer.chat_template",
+                template_sha256=(
+                    sha256_bytes(template.encode("utf-8"))
+                    if isinstance(template, str)
+                    else None
+                ),
+                rendered=rendered,
+                add_generation_prompt=True,
+            )
+            return encoded, prompt, "chat_template", None
         rendered = (
             f"{request.system}\n\n{request.input_text}"
             if request.system
             else request.input_text
         )
-        return tokenizer(rendered, return_tensors="pt")
+        prompt = PromptInfo(rendered=rendered, add_generation_prompt=None)
+        return tokenizer(rendered, return_tensors="pt"), prompt, "text", True
+
 
     def generate(self, request: GenerationRequest, *, budget: Budget) -> GenerationTrace:
         try:
@@ -281,7 +477,9 @@ class HuggingFaceBackend:
         except ImportError as exc:  # pragma: no cover - torch is a core dependency
             raise UnsupportedError("torch is required for local generation") from exc
         model, tokenizer = self._load()
-        encoded = self._render_prompt(tokenizer, request)
+        encoded, prompt_info, token_encoding, add_special_tokens = self._render_prompt(
+            tokenizer, request
+        )
         if "input_ids" not in encoded:
             raise ExecutionError("tokenizer did not return input_ids")
         device = model.device
@@ -432,7 +630,11 @@ class HuggingFaceBackend:
                             ChatMessage(role="user", content=request.input_text),
                         ]
                     ),
+                    token_ids=[int(value) for value in input_ids[0].tolist()],
+                    token_encoding=token_encoding,  # type: ignore[arg-type]
+                    add_special_tokens=add_special_tokens,
                 ),
+                prompt=prompt_info,
                 backend=BackendRef(
                     name="huggingface",
                     version=(self.info().runtime or {}).get("transformers"),
@@ -479,4 +681,7 @@ def build_backend(spec: BackendSpec, *, budget: Budget) -> GenerationBackend:
     if spec.kind == "huggingface":
         assert spec.huggingface is not None
         return HuggingFaceBackend(spec.huggingface)
+    if spec.kind == "synthetic":
+        assert spec.synthetic is not None
+        return SyntheticBackend(spec.synthetic)
     raise InputError(f"unknown backend kind {spec.kind!r}")

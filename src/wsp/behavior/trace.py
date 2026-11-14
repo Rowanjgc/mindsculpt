@@ -103,6 +103,12 @@ def finalize_trace(trace: GenerationTrace, budget: Budget) -> GenerationTrace:
         if trace.input.artifact_id is not None
         else sha256_text(trace.input.text)
     )
+    if trace.input.token_ids:
+        trace.input.tokens_sha256 = sha256_bytes(
+            canonical_bytes([int(value) for value in trace.input.token_ids])
+        )
+    else:
+        trace.input.tokens_sha256 = None
     if trace.text is not None:
         trace.checksums["output_sha256"] = sha256_text(trace.text) or ""
     else:

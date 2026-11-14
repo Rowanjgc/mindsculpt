@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+
+# Test helpers live in ``tests/support`` and are imported by both test tiers.
+sys.path.insert(0, str(Path(__file__).parent))
 
 import pytest
 import torch
@@ -115,3 +119,22 @@ def trace_store(workspace: Workspace):
     from wsp.behavior.trace import TraceStore
 
     return TraceStore(workspace)
+
+
+@pytest.fixture
+def tiny_lm():
+    """A deterministic causal transformer with a real tokenizer (no download)."""
+
+    from support.tiny_lm import build_runtime
+
+    return build_runtime()
+
+
+@pytest.fixture
+def tiny_trace(tiny_lm):
+    def _make(prompt: str, *, max_new_tokens: int = 8):
+        from support.tiny_lm import make_trace
+
+        return make_trace(tiny_lm, prompt, max_new_tokens=max_new_tokens)
+
+    return _make

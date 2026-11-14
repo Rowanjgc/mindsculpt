@@ -19,6 +19,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from wsp.core.models import ArtifactRef
+from wsp.execution.synthetic_lm import SyntheticModelSpec
 
 REASONING_NOTE = (
     "Measurements and evaluations in this record describe observed behavior. "
@@ -442,21 +443,39 @@ class HuggingFaceBackendConfig(StrictModel):
     compute_file_sha256: bool = False
 
 
+class SyntheticBackendConfig(StrictModel):
+    """Configuration for the offline deterministic fixture model.
+
+    The model is rebuilt from this specification on demand, so a trace recorded
+    through this backend can be replayed later without shipping weights.
+    """
+
+    model: SyntheticModelSpec = Field(default_factory=SyntheticModelSpec)
+    name: str = "tiny-causal-lm"
+
+
 class BackendSpec(StrictModel):
-    kind: Literal["scripted", "huggingface"]
+    kind: Literal["scripted", "huggingface", "synthetic"]
     scripted: ScriptedBackendConfig | None = None
     huggingface: HuggingFaceBackendConfig | None = None
+    synthetic: SyntheticBackendConfig | None = None
+
+    _CONFIG_FIELD = {
+        "scripted": "scripted",
+        "huggingface": "huggingface",
+        "synthetic": "synthetic",
+    }
 
     @model_validator(mode="after")
     def _one_config(self) -> "BackendSpec":
-        if self.kind == "scripted" and self.scripted is None:
-            raise ValueError("scripted backend requires a scripted configuration")
-        if self.kind == "huggingface" and self.huggingface is None:
-            raise ValueError("huggingface backend requires a huggingface configuration")
-        if self.kind == "scripted" and self.huggingface is not None:
-            raise ValueError("unused huggingface configuration")
-        if self.kind == "huggingface" and self.scripted is not None:
-            raise ValueError("unused scripted configuration")
+        required = self._CONFIG_FIELD[self.kind]
+        for kind, field_name in self._CONFIG_FIELD.items():
+            value = getattr(self, field_name)
+            if kind == required:
+                if value is None:
+                    raise ValueError(f"{kind} backend requires a {field_name} configuration")
+            elif value is not None:
+                raise ValueError(f"unused {field_name} configuration")
         return self
 
 

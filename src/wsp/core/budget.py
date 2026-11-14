@@ -51,6 +51,17 @@ class Budget(BaseModel):
     max_case_traces: int = Field(default=64, gt=0)
     max_import_traces: int = Field(default=64, gt=0)
 
+    # Replay and internal investigation
+    max_replay_sequence_tokens: int = Field(default=4_096, gt=0)
+    max_replay_logits_elements: int = Field(default=200_000_000, gt=0)
+    max_replay_agreement_tokens: int = Field(default=512, gt=0)
+    max_alignment_tokens: int = Field(default=20_000, gt=0)
+    max_alignment_span_tokens: int = Field(default=4_096, gt=0)
+    max_capture_positions: int = Field(default=1_024, gt=0)
+    max_capture_artifacts: int = Field(default=64, gt=0)
+    max_comparison_elements: int = Field(default=20_000_000, gt=0)
+    max_activation_scan_captures: int = Field(default=64, gt=0)
+
     # Structured output
     max_output_bytes: int = Field(default=2_000_000, gt=0)
     max_artifact_bytes: int = Field(default=268_435_456, gt=0)

@@ -437,5 +437,64 @@ def import_case(
     _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
 
 
+
+@app.command("replay-plan")
+def replay_plan(
+    ctx: typer.Context,
+    trace_id: str = typer.Argument(..., help="Stored trace to replay."),
+    max_sequence_length: int = typer.Option(2048, "--max-sequence-length"),
+    atol: float = typer.Option(0.05, "--logprob-atol"),
+    no_save: bool = typer.Option(False, "--no-save"),
+    input_json: str | None = typer.Option(None, "--json", help="Full PrepareReplayInput payload."),
+) -> None:
+    """Turn a trace into an explicit teacher-forced replay plan."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    if input_json:
+        payload = json.loads(input_json)
+    else:
+        payload = {
+            "trace_id": trace_id,
+            "execution": {"max_sequence_length": max_sequence_length},
+            "tolerances": {"logprob_atol": atol},
+            "save": not no_save,
+        }
+    envelope = service.call("prepare_replay", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("replay")
+def replay(
+    ctx: typer.Context,
+    trace_id: str | None = typer.Argument(None, help="Stored trace to replay."),
+    plan: str | None = typer.Option(None, "--plan", help="Stored replay plan artifact id."),
+    model: str = typer.Option(
+        '{"kind": "synthetic"}',
+        "--model",
+        help="Model source JSON, for example {\"kind\": \"synthetic\"} or a local_hf path.",
+    ),
+    full_tokens: bool = typer.Option(
+        False, "--tokens/--no-tokens", help="Include per-token agreement rows."
+    ),
+    no_save: bool = typer.Option(False, "--no-save"),
+    input_json: str | None = typer.Option(None, "--json", help="Full VerifyReplayInput payload."),
+) -> None:
+    """Execute a teacher-forced replay and report measured agreement."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    if input_json:
+        payload = json.loads(input_json)
+    else:
+        if trace_id is None and plan is None:
+            raise typer.BadParameter("provide TRACE_ID or --plan")
+        payload = {
+            "trace_id": trace_id,
+            "plan_artifact_id": plan,
+            "model": json.loads(model),
+            "include_per_token": full_tokens,
+            "save": not no_save,
+        }
+    envelope = service.call("verify_replay", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()
