@@ -149,22 +149,28 @@ def run_capture(
     store: ArtifactStore | None = None,
     budget: Budget | None = None,
     warnings: Iterable[str] = (),
+    capture: object | None = None,
+    instrumentation: str = "torch_hooks",
 ) -> CaptureOutcome:
     settings = budget or Budget()
     sequence_length = len(plan.sequence.full_token_ids)
-    module = torch_module_of(model)
-    paths = validate_modules(module, modules, budget=settings)
 
-    collector = PositionedActivationCapture(
-        module,
-        paths,
-        positions,
-        sequence_length=sequence_length,
-        mode=mode,
-        record_inputs=include_inputs,
-        first_call_only=first_call_only,
-        budget=settings,
-    )
+    if capture is not None:
+        collector = capture
+        paths = list(getattr(collector, "module_paths", []))
+    else:
+        module = torch_module_of(model)
+        paths = validate_modules(module, modules, budget=settings)
+        collector = PositionedActivationCapture(
+            module,
+            paths,
+            positions,
+            sequence_length=sequence_length,
+            mode=mode,
+            record_inputs=include_inputs,
+            first_call_only=first_call_only,
+            budget=settings,
+        )
     execution = execute_replay(plan, model, budget=settings, capture=collector)
     result = execution.result
     if result.forward is None or not result.forward_executed:
@@ -259,6 +265,7 @@ def run_capture(
         metadata={
             "sequence_sha256": plan.sequence.sequence_sha256,
             "sequence_source": plan.sequence.source,
+            "instrumentation": instrumentation,
             "capture_positions_note": (
                 "positions are full-sequence forward positions; requested_tokens are the token "
                 "indices whose states were requested"

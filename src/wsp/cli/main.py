@@ -506,6 +506,11 @@ def capture_points(
     ),
     kind: list[str] | None = typer.Option(None, "--kind", help="Restrict to an architectural role."),
     limit: int = typer.Option(200, "--limit"),
+    instrumentation: str = typer.Option(
+        "torch_hooks",
+        "--instrumentation",
+        help="torch_hooks (default, always available) or nnterp (optional dependency).",
+    ),
     input_json: str | None = typer.Option(None, "--json", help="Full ListCapturePointsInput payload."),
 ) -> None:
     """List module paths in a local model that can be targeted by a capture."""
@@ -513,7 +518,11 @@ def capture_points(
     if input_json:
         payload = json.loads(input_json)
     else:
-        payload = {"model": json.loads(model), "limit": limit}
+        payload = {
+            "model": json.loads(model),
+            "limit": limit,
+            "instrumentation": instrumentation,
+        }
         if kind:
             payload["kinds"] = list(kind)
     envelope = service.call("list_capture_points", payload)
@@ -535,6 +544,11 @@ def capture(
     ),
     model: str = typer.Option('{"kind": "synthetic"}', "--model"),
     values: bool = typer.Option(False, "--values/--no-values", help="Echo retained values."),
+    instrumentation: str = typer.Option(
+        "torch_hooks",
+        "--instrumentation",
+        help="torch_hooks (default, always available) or nnterp (optional dependency).",
+    ),
     no_save: bool = typer.Option(False, "--no-save"),
     input_json: str | None = typer.Option(
         None, "--json", help="Full CaptureTraceActivationsInput payload."
@@ -552,6 +566,7 @@ def capture(
             "mode": mode,
             "position_semantics": semantics,
             "include_values": values,
+            "instrumentation": instrumentation,
             "save": not no_save,
         }
         if span:

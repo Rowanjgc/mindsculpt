@@ -42,6 +42,7 @@ def load_local_causal_lm(
     *,
     device: str = "cpu",
     dtype: str | None = None,
+    attn_implementation: str | None = None,
 ) -> HuggingFaceCausalLMAdapter:
     """Load a causal LM from an existing local directory only."""
 
@@ -67,6 +68,8 @@ def load_local_causal_lm(
         from wsp.core.dtypes import torch_dtype_from_name
 
         kwargs["torch_dtype"] = torch_dtype_from_name(dtype)
+    if attn_implementation is not None:
+        kwargs["attn_implementation"] = attn_implementation
     model = AutoModelForCausalLM.from_pretrained(str(local_path), **kwargs)
     tokenizer = AutoTokenizer.from_pretrained(
         str(local_path), local_files_only=True, trust_remote_code=False

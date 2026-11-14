@@ -49,6 +49,39 @@ def _require_workspace(service: Any) -> Any:
 def list_capture_points(service: Any, request: ListCapturePointsInput, budget: Budget, run: Any):
     """Enumerate module paths that can be targeted by a capture request."""
 
+    if request.instrumentation == "nnterp":
+        from wsp.investigation.nnsight_backend import (
+            capture_backend_capabilities,
+            load_nnterp_model,
+        )
+
+        source = request.model
+        if source.kind != "local_hf":
+            raise InputError(
+                "the nnterp backend needs a local Hugging Face checkpoint",
+                details={
+                    "kind": source.kind,
+                    "hint": "set model.kind to 'local_hf' and model.path to a local checkpoint directory",
+                },
+            )
+        assert source.path is not None
+        model = load_nnterp_model(
+            source.path,
+            device=source.device,
+            dtype=source.dtype,
+            compute_file_sha256=source.compute_file_sha256,
+        )
+        listing = model.capture_points(limit=request.limit, budget=budget)
+        data = listing.model_dump(mode="json")
+        data["points"] = [
+            point
+            for point in data["points"]
+            if not request.kinds or point["kind"] in set(request.kinds)
+        ]
+        data["source"] = request.model.describe()
+        data["instrumentation"] = capture_backend_capabilities()
+        return _result(data)
+
     model = load_replay_source(request.model)
     listing = discover_points(
         torch_module_of(model),
@@ -59,6 +92,13 @@ def list_capture_points(service: Any, request: ListCapturePointsInput, budget: B
     )
     data = listing.model_dump(mode="json")
     data["source"] = request.model.describe()
+    data["instrumentation"] = {
+        "backend": "torch_hooks",
+        "available": True,
+        "caveats": [
+            "paths are the checkpoint's own module names, so they differ between architectures"
+        ],
+    }
     return _result(data)
 
 
@@ -128,6 +168,58 @@ def _requested_tokens(
     return [int(index) for index in request.positions], [], None
 
 
+def _instrument(
+    request: CaptureTraceActivationsInput,
+    *,
+    budget: Budget,
+    sequence_length: int,
+    positions: list[int],
+) -> tuple[Any, Any, list[str]]:
+    """Resolve the requested instrumentation backend.
+
+    The backend is never substituted silently: asking for ``nnterp`` either
+    yields an nnterp capture (with its identity recorded in the evidence) or a
+    clear error explaining why the optional backend is unavailable.
+    """
+
+    warnings: list[str] = []
+    if request.instrumentation == "torch_hooks":
+        return load_replay_source(request.model), None, warnings
+
+    from wsp.investigation.nnsight_backend import NnterpCapture, load_nnterp_model
+
+    source = request.model
+    if source.kind != "local_hf":
+        raise InputError(
+            "the nnterp backend needs a local Hugging Face checkpoint",
+            details={
+                "kind": source.kind,
+                "hint": "set model.kind to 'local_hf' and model.path to a local checkpoint directory",
+            },
+        )
+    assert source.path is not None
+    model = load_nnterp_model(
+        source.path,
+        device=source.device,
+        dtype=source.dtype,
+        compute_file_sha256=source.compute_file_sha256,
+    )
+    capture = NnterpCapture(
+        model,
+        request.modules,
+        positions,
+        sequence_length=sequence_length,
+        mode=request.mode,
+        record_inputs=request.include_inputs,
+        budget=budget,
+    )
+    warnings.append(
+        "activations were captured through the optional nnterp backend; the evidence records "
+        "backend='nnterp' together with the nnterp and nnsight versions"
+    )
+    return model, capture, warnings
+
+
 def capture_trace_activations(
     service: Any, request: CaptureTraceActivationsInput, budget: Budget, run: Any
 ):
@@ -181,7 +273,13 @@ def capture_trace_activations(
             )
         )
 
-    model = load_replay_source(request.model)
+    model, capture_object, backend_warnings = _instrument(
+        request,
+        budget=budget,
+        sequence_length=sequence_length,
+        positions=positions,
+    )
+    warnings.extend(backend_warnings)
     outcome = run_capture(
         plan,
         model,
@@ -200,6 +298,8 @@ def capture_trace_activations(
         store=workspace.artifacts if request.save else None,
         budget=budget,
         warnings=warnings,
+        capture=capture_object,
+        instrumentation=request.instrumentation,
     )
     capture_record = outcome.record
     artifacts.extend(outcome.artifacts)
@@ -368,7 +468,8 @@ def register_capture_tools(service: Any) -> None:
     definitions = [
         (
             "list_capture_points",
-            "List module paths in a local model that can be targeted by an activation capture, classified by architectural role.",
+            "List module paths in a local model that can be targeted by an activation capture, classified by architectural role. "
+            "Pass instrumentation='nnterp' for normalised layer paths from the optional nnterp backend.",
             ListCapturePointsInput,
             list_capture_points,
             "Bounded module listing with paths, class names, kinds, and parameter counts.",
@@ -376,7 +477,8 @@ def register_capture_tools(service: Any) -> None:
         ),
         (
             "capture_trace_activations",
-            "Replay a recorded trace and measure selected internal states at selected token positions, either as bounded statistics or as retained vectors.",
+            "Replay a recorded trace and measure selected internal states at selected token positions, either as bounded statistics or as retained vectors. "
+            "The optional nnterp instrumentation backend must be requested explicitly and is recorded in the resulting evidence.",
             CaptureTraceActivationsInput,
             capture_trace_activations,
             "A capture record with positions, measurements, resource accounting, replay verification status, and artifact references.",

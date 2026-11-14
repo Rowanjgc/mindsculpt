@@ -437,6 +437,7 @@ def load_local_replay_model(
     device: str = "cpu",
     dtype: str | None = None,
     compute_file_sha256: bool = True,
+    attn_implementation: str | None = None,
 ) -> HuggingFaceReplayModel:
     """Load a causal LM from an existing local directory.
 
@@ -457,7 +458,12 @@ def load_local_replay_model(
         ) from exc
     from wsp.adapters.huggingface import load_local_causal_lm
 
-    adapter = load_local_causal_lm(local_path, device=device, dtype=dtype)
+    adapter = load_local_causal_lm(
+        local_path,
+        device=device,
+        dtype=dtype,
+        attn_implementation=attn_implementation,
+    )
     return HuggingFaceReplayModel(
         model=adapter.model,
         tokenizer=adapter.tokenizer,

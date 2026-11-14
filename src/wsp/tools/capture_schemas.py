@@ -12,6 +12,7 @@ from wsp.replay.sources import ReplayModelSource
 from wsp.tools.schemas import ToolInput
 
 _Role = Literal["prompt", "generation"]
+_Instrumentation = Literal["torch_hooks", "nnterp"]
 
 
 class ListCapturePointsInput(ToolInput):
@@ -21,6 +22,7 @@ class ListCapturePointsInput(ToolInput):
     include_submodules: bool = True
     kinds: list[str] | None = None
     limit: int = Field(default=200, gt=0, le=5000)
+    instrumentation: _Instrumentation = "torch_hooks"
 
 
 class CaptureTraceActivationsInput(ToolInput):
@@ -36,6 +38,7 @@ class CaptureTraceActivationsInput(ToolInput):
     model: ReplayModelSource
     modules: list[str] = Field(min_length=1, max_length=32)
     mode: CaptureMode = "summary"
+    instrumentation: _Instrumentation = "torch_hooks"
     positions: list[int] | None = None
     role: _Role | None = None
     role_start: int | None = Field(default=None, ge=0)

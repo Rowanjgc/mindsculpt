@@ -17,7 +17,7 @@ from wsp.investigation.models import CapturePoint, CapturePointList
 _MAX_CHILDREN = 32
 
 _ATTENTION = ("attention", "attn", "self_attn", "cross_attn", "q_proj", "k_proj", "v_proj", "o_proj", "qkv")
-_LINEAR_ATTENTION = ("linearattention", "linear_attention", "gateddeltanet", "gated_delta", "deltanet", "selective_scan", "mamba", "ssm")
+_LINEAR_ATTENTION = ("linearattention", "linear_attention", "linear_attn", "gateddeltanet", "gated_delta", "deltanet", "selective_scan", "mamba", "ssm")
 _RECURRENT = ("recurrent", "mixer", "conv1d", "causal_conv", "state_update", "gated_delta_rule")
 _MLP = ("mlp", "feed_forward", "feedforward", "ffn", "gate_proj", "up_proj", "down_proj", "swiglu")
 _NORM = ("norm", "layernorm", "rmsnorm", "batchnorm", "groupnorm")
@@ -46,16 +46,19 @@ def _classify(path: str, class_name: str) -> str:
         return "linear-attention"
     if any(marker in haystack for marker in _RECURRENT):
         return "recurrent"
-    if any(marker in lowered for marker in _ATTENTION):
-        return "attention"
-    if any(marker in lowered for marker in _MLP):
-        return "mlp"
+    # Norms come before attention on purpose: hybrid stacks name the
+    # normalisation that precedes an attention block
+    # ``post_attention_layernorm``, and it is a norm, not an attention module.
     if any(marker in lowered for marker in _NORM):
         return "norm"
     if any(marker in lowered for marker in _EMBEDDING):
         return "embedding"
     if any(marker in lowered for marker in _HEAD):
         return "head"
+    if any(marker in lowered for marker in _MLP):
+        return "mlp"
+    if any(marker in lowered for marker in _ATTENTION):
+        return "attention"
     if any(marker in lowered for marker in _BLOCK):
         return "block"
     if "aggregate" in haystack:
