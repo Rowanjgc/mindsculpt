@@ -233,6 +233,54 @@ wsp inspect-evidence a_4444...
 `allow_different_models` (default `false`). Explicit alignments must set
 `reviewed: true`.
 
+## Causal intervention operations
+
+| Operation | Purpose |
+| --- | --- |
+| `create_activation_intervention` | Build and validate a versioned intervention spec |
+| `validate_activation_intervention` | Check compatibility without running the intervention |
+| `preview_activation_intervention` | Human-readable scope, shape, and cost estimate |
+| `run_activation_intervention` | Execute one condition and record a result |
+| `run_paired_intervention` | Baseline, identity control, intervention (+ optional control) |
+| `compare_intervention_results` | Re-read a stored paired comparison |
+| `run_counterfactual_continuation` | Bounded greedy continuation comparison |
+| `inspect_counterfactual_comparison` | Read a paired comparison or continuation record |
+| `attach_intervention_evidence` | Attach interventions and continuations to a case |
+
+```bash
+wsp create-activation-intervention --name "zero block 1 token 3" \
+    --capture a_1111... --module blocks.1 --position 3 --operation zero
+wsp validate-activation-intervention a_2222... --model '{"kind":"local_hf","path":"./ckpt"}'
+wsp preview-activation-intervention a_2222... --model '{"kind":"local_hf","path":"./ckpt"}'
+wsp run-paired-intervention a_2222... --model '{"kind":"local_hf","path":"./ckpt"}' \
+    --trace tr_1f2e... --measure-module blocks.2 --logit-position 3
+wsp run-counterfactual-continuation a_2222... --model '{"kind":"local_hf","path":"./ckpt"}' \
+    --token-id 1 --token-id 42 --token-id 7 --max-new-tokens 4
+wsp attach-intervention-evidence --title "ablation effect" --case case_1a2b... \
+    --intervention a_2222... --comparison a_3333... --continuation a_5555...
+```
+
+Creating from a `trace_capture` derives the model reference, backend, device,
+dtype, sequence length, replay/alignment ids, and the target module from the
+capture; callers still supply positions, role, semantics, and operation.
+`mean` accepts `mean_values` or `mean_artifact_id`, or `mean_source_capture_artifact_id`
+plus `mean_positions` and `mean_token_alignment`. `patch` accepts `donor_values`,
+`donor_values_artifact_id`, or `donor_capture_artifact_id` plus `donor_positions`.
+
+Paired runs require an execution `source`, and `token_ids` or a `trace_id`.
+`measure_modules`, `measure_positions`, `measure_tensor_names`, `logit_positions`,
+`alternative_intervention`, `direction`, `identity`, `identity_atol`, and
+`identity_rtol` are optional. Continuations add `max_new_tokens`,
+`max_sequence_length`, `eos_token_id`, `seed`, and `stop_on_eos`; the spec is
+retargeted to `uncached-continuation` when it was created for teacher-forced
+replay.
+
+All nine operations are also available through `ToolService.call`, with the
+same inputs and the same `wsp.tool/1.0` envelope. Failures are explicit:
+incompatible models, shapes, dtypes, capture points, sequence lengths, budgets,
+or an unreadable replacement raise a typed error rather than falling back to a
+different operation.
+
 ## Privacy in exports
 
 `export_trace` and `export_failure_case` take an explicit policy:

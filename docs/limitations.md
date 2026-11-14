@@ -244,6 +244,40 @@ silently.
   identifier-shaped fields. Undeclared identifiers that look structural are
   removed but not searched for.
 
+## Causal interventions and continuations
+
+- Interventions run on the generic PyTorch forward-hook backend only. The
+  optional nnterp backend remains capture-only in V1.3; intervention requests
+  against it are rejected, never silently rerouted.
+- One intervention site per specification. `apply_on_calls` selects which calls
+  receive it, but the workbench does not compose multi-site interventions or
+  coordinated cross-layer sweeps.
+- The engine rebuilds one nesting level of structured module output (tensor,
+  tuple, list, mapping). Deeper structures must be addressed by an explicit
+  `tensor_name`/`tensor_index` path that the code supports, or are rejected.
+- An intervention on a hybrid or recurrent module can affect later states and
+  caches. Paired teacher-forced measurements and uncached continuations report
+  their execution mode; the workbench never claims that cached generation and
+  full-prefix execution behave identically.
+- Continuations are greedy, uncached, and full-prefix. Sampling, KV-cache
+  manipulation, beam search, and stateful generation are not supported.
+- A measured downstream difference is an effect under the stated conditions. It
+  is not proof that the intervened component explains a behavior, and the
+  workbench never emits automatic causal labels, circuit discoveries, or
+  capability claims.
+- An identity-control failure invalidates causal interpretation. The workbench
+  reports it and stops; it does not retry, adjust tolerances, or conceal the
+  mismatch.
+- Mean ablation is only as meaningful as its recorded provenance. A mean
+  computed from unrelated examples is recorded as such, not silently treated as
+  a neutral baseline.
+- Full-vocabulary logits are bounded by `max_replay_logits_elements`; selected
+  comparison rows are bounded separately by `max_intervention_logit_elements`.
+  Requests above either limit fail rather than truncating silently.
+- Donor activations and continuation outputs are sensitive. Redacted exports
+  drop inline donor/mean values, generated tokens, and free-form diagnostic
+  text; private exports retain them by design.
+
 ## Known V1.2 gaps
 
 - No MCP server is included. The JSON schemas and service layer are designed so
@@ -255,11 +289,10 @@ silently.
 - No automatic GPU memory planning or multi-device execution.
 - No patch composition on a single tensor inside one set.
 - No bitwise replay guarantee across machines.
-- No activation patching, ablation, or counterfactual continuation. V1.2
-  measures states; it does not intervene on them.
 - No automatic span selection, mechanism discovery, or dimension labelling.
 - No generation-time activation recording, and no pooled aggregation of raw
   activations across positions beyond the documented summary statistics.
 - The optional nnterp backend has been exercised on one synthetic hybrid
   architecture and on one real Qwen3.5 hybrid checkpoint; other families are
   untested and may be refused.
+- V1.3 interventions do not run through nnterp, cached generation, or sampling.

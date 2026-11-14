@@ -1,7 +1,9 @@
 # Offline examples
 
 These examples require no network access, no Hugging Face download, and no LLM.
-They use a deterministic tiny `TinyMLP` defined in the workbench itself.
+They use deterministic tiny models defined in the workbench itself (a `TinyMLP`
+for checkpoint mechanics and a small causal transformer for behavioral,
+replay, and intervention work).
 
 ## 1. Create the tiny checkpoint
 
@@ -85,7 +87,32 @@ against a real Hugging Face checkpoint instead of the synthetic model.
 The script is an infrastructure demonstration. It does not claim to find a real
 model defect or a causal mechanism.
 
-## 5. Same patch through the CLI
+## 5. Causal intervention and continuation
+
+```bash
+python examples/causal_investigation.py
+```
+
+This runs the V1.3 chain end-to-end against the tiny deterministic transformer,
+offline:
+
+- records an observation and a control trace;
+- prepares and verifies a teacher-forced replay;
+- captures selected activations and creates an identity intervention;
+- verifies baseline and identity agreement, then creates a zero ablation;
+- runs a paired measurement with downstream module differences;
+- captures a donor activation and applies a patch;
+- runs a bounded greedy continuation and reports the first divergence;
+- attaches the experiment to a failure case and exports it privately and in
+  redacted mode;
+- reloads both bundles into fresh workspaces, verifies checksums and references,
+  and confirms the model parameters never changed.
+
+Pass `--workspace <path>` to keep the generated workspace. The script prints
+`[1]`–`[19]` stage markers. It demonstrates infrastructure correctness, not a
+scientific discovery.
+
+## 6. Same patch through the CLI
 
 ```bash
 wsp --workspace examples/out/workspace call create_patch \

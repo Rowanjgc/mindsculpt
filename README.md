@@ -4,12 +4,12 @@ An open-source, model-agnostic **Weight-Space Programming Workbench**: bounded
 instruments for observing, inspecting, measuring, patching, executing, and
 reproducing work on neural-network weights and behavior.
 
-V1.2 is deliberately **tools first**. It is not an autonomous agent, a training
+V1.3 is deliberately **tools first**. It is not an autonomous agent, a training
 loop, a benchmark platform, or an interpreter for neurons. It provides reliable
 primitives that a person or a future tool-using agent can compose, with the same
 operations exposed through Python, a CLI, and JSON tool schemas.
 
-> **Status:** V1.2 complete. CPU-only, offline tests and examples. No LLM, cloud
+> **Status:** V1.3 complete. CPU-only, offline tests and examples. No LLM, cloud
 > service, API key, or network access is required.
 
 ## What V1 includes
@@ -85,6 +85,35 @@ still an instrument kit: it measures, it does not conclude.
 - **Investigation evidence** — findings, replays, alignments, captures,
   comparisons, and unverified hypotheses linked to a failure case, exported and
   reloaded with rewritten references and explicit omission records.
+
+## What V1.3 adds: controlled causal interventions
+
+V1.3 adds the instruments needed to *intervene* on an activation during an
+execution and measure the consequences. It builds the experiment; it does not
+claim a discovery.
+
+- **Activation interventions** — a versioned `wsp.activation-intervention/1.0`
+  specification naming the model, execution identity, module, capture point,
+  tensor role, position semantics, slice, operation, replacement source,
+  dtype conversion policy, and resource limits. No executable scripts.
+- **Four operations** — identity (the mandatory negative control), zero
+  ablation, mean ablation with mandatory provenance, and donor activation
+  patching with shape/dtype/model compatibility checks.
+- **Reversible execution** — one forward hook modifies only the selected region
+  of the selected tensor, clones before writing, preserves structured outputs,
+  never edits parameters, and cleans up on success and failure.
+- **Paired counterfactual measurement** — baseline, identity control, and
+  intervention with identical weights and inputs, plus an optional alternative
+  control. Downstream logits, token log-probabilities, activation differences,
+  and effect sizes are recorded. A failed identity control invalidates the
+  comparison rather than being hidden.
+- **Controlled continuations** — a separate, explicitly uncached full-prefix
+  greedy mode comparing generated tokens, termination, longest common prefix,
+  and first divergence. Cached generation is not claimed.
+- **Causal evidence integration** — intervention and continuation references
+  attach to existing failure cases and evidence bundles, survive export/reload,
+  and are transformed or omitted by the same privacy system as every other
+  artifact.
 
 ## Install
 
@@ -184,6 +213,33 @@ WSP_REAL_MODEL=<local checkpoint directory> \
 A skipped tier-3 run means real-checkpoint compatibility is unverified on that
 machine, not that it passed.
 
+### Causal intervention workflow (offline)
+
+```bash
+python examples/causal_investigation.py
+```
+
+It builds a deterministic transformer, records an observation and a control
+trace, verifies a replay, captures the targeted activation, runs an identity
+control (exactly equal to the baseline), performs a zero ablation and a donor
+patch, compares downstream logits and token log-probabilities, runs a bounded
+greedy continuation and identifies the first divergence, attaches the experiment
+to a failure case, exports and reloads it in a fresh workspace, verifies
+checksums and references, confirms the parameters never changed, and produces a
+privacy-safe redacted export.
+
+Minimal CLI version:
+
+```bash
+wsp create-activation-intervention --name "zero ablation" \
+    --capture a_... --module blocks.1 --operation zero --position 2
+wsp preview-activation-intervention --intervention a_... \
+    --source '{"kind": "synthetic"}' --tokens 1,5,6,7
+wsp run-paired-intervention --intervention a_... \
+    --source '{"kind": "synthetic"}' --tokens 1,5,6,7 \
+    --measure-module blocks.2
+```
+
 ### CLI walkthrough
 
 ```bash
@@ -270,6 +326,11 @@ result = service.call("inspect_model", {"path": "examples/out/tiny_mlp.safetenso
   evaluated upstream projects, tested versions, and integration decisions.
 - [`docs/tool-api.md`](docs/tool-api.md) — every structured operation, schemas,
   errors, limits, and examples.
+- [`docs/causal-interventions.md`](docs/causal-interventions.md) — intervention
+  specs, zero/mean/identity/donor operations, validation, paired measurement,
+  and limitations.
+- [`docs/counterfactual-continuations.md`](docs/counterfactual-continuations.md) —
+  uncached greedy continuations, position semantics, divergence, and limits.
 - [`docs/patch-format.md`](docs/patch-format.md) — the versioned patch format,
   operations, compatibility checks, casting, export, and rollback.
 - [`docs/limitations.md`](docs/limitations.md) — supported formats,

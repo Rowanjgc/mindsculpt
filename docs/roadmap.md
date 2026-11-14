@@ -133,9 +133,55 @@ implemented merely because they sound useful.
 - An offline end-to-end walkthrough, a synthetic hybrid transformer fixture, and
   an optional real-checkpoint test procedure.
 
+## Completed in V1.3
+
+### Controlled causal interventions
+
+- Versioned intervention specifications (`wsp.activation-intervention/1.0`)
+  covering model and execution identity, backend, module, tensor role, token
+  positions and semantics, feature slice, operation, replacement provenance,
+  expected shape/dtype, and resource limits.
+- Zero ablation, mean ablation with explicit provenance, donor activation
+  patching with compatibility validation, and an identity negative control.
+- Reversible execution-time hooks that modify only the selected region, clone
+  before writing, preserve structured module output, restore hook state in
+  `finally`, and verify parameter immutability with a before/after fingerprint.
+- Structured validation and preview without executing the intervention, plus a
+  human-readable scope and cost estimate.
+
+### Paired measurement and continuations
+
+- Paired baseline/identity/intervention measurement
+  (`wsp.counterfactual-comparison/1.0`), with an optional alternative control,
+  shared inputs and settings, targeted slice before/after statistics, downstream
+  module differences, selected logits, token log-probability deltas, and explicit
+  effect sizes.
+- Mandatory identity-control agreement reporting: `exact`, `within_tolerance`, or
+  a failure that marks the experiment invalid.
+- Bounded, deterministic, uncached full-prefix greedy continuations
+  (`wsp.continuation-comparison/1.0`) with recorded prefix ids, generation
+  configuration, seeds, per-condition outputs, termination reasons, longest
+  common prefix, and first divergence.
+
+### Evidence, privacy, and interfaces
+
+- Intervention and continuation references integrated into
+  `wsp.investigation-evidence/1.0` and `wsp.case/1.0` without breaking older
+  records.
+- Case export/import of all new artifact types in private and redacted modes.
+- Privacy hardening: every removed string of any length is checked by exact
+  equality inside decoded JSON, explicit sensitive markers are checked as
+  substrings regardless of length, Unicode normalization and bounded
+  base64-decoding are scanned, non-structural nested keys are redacted, and
+  untransformable artifacts fail or are omitted under explicit policy.
+- Nine structured operations and matching CLI commands sharing the existing
+  service layer.
+- Offline end-to-end demonstration, tiny-transformer integration tests, short/
+  Unicode privacy tests, and optional real-checkpoint intervention tests.
+
 ## Deliberately deferred
 
-These are **not** in V1.2:
+These are **not** in V1.3:
 
 - Autonomous research agents or LLM provider integration.
 - Automatic weight-edit discovery, gradient optimization, or fine-tuning.
@@ -152,9 +198,11 @@ These are **not** in V1.2:
 - LLM-based evaluators or hosted evaluation providers.
 - Automatic weight-patch discovery from behavioral findings.
 - A large defect taxonomy or benchmark leaderboard.
-- Activation patching, ablation, or counterfactual continuation experiments.
 - Generation-time activation recording over long generations.
 - Automatic span selection or automatic mechanism naming.
+- nnterp-backed interventions, cached/stateful generation, and sampling
+  continuations.
+- Multi-site or coordinated cross-layer intervention sweeps.
 
 ## Possible future work (hypotheses, not commitments)
 

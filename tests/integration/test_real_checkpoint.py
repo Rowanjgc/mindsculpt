@@ -144,3 +144,209 @@ def test_capture_is_bounded(service: ToolService, trace_id: str):
                 "positions": [0],
             },
         )
+
+
+@pytest.fixture(scope="module")
+def control_trace_id(service: ToolService) -> str:
+    envelope = service.call(
+        "record_trace",
+        {
+            "input_text": "The capital of Germany is",
+            "params": {"max_new_tokens": 4},
+            "backend": {
+                "kind": "huggingface",
+                "huggingface": {
+                    "model_path": str(checkpoint),
+                    "compute_file_sha256": False,
+                },
+            },
+        },
+    )
+    assert envelope["ok"], envelope
+    return envelope["data"]["trace"]["trace_id"]
+
+
+@pytest.fixture(scope="module")
+def staged(service: ToolService, trace_id: str, control_trace_id: str) -> dict:
+    plan = service.call("prepare_replay", {"trace_id": trace_id})["data"]
+    stored = service.workspace.artifacts.read_json(plan["plan_artifact_id"])
+    tokens = list(stored["sequence"]["full_token_ids"])
+
+    points = service.call(
+        "list_capture_points",
+        {"model": {"kind": "local_hf", "path": str(checkpoint)}, "limit": 500},
+    )["data"]
+    blocks = [point["path"] for point in points["points"] if point["kind"] == "block"]
+    module = blocks[len(blocks) // 2]
+
+    positions = sorted({max(len(tokens) - 2, 0), len(tokens) - 1})
+    capture = service.call(
+        "capture_trace_activations",
+        {
+            "trace_id": trace_id,
+            "model": {"kind": "local_hf", "path": str(checkpoint)},
+            "modules": [module],
+            "positions": positions,
+            "position_semantics": "consuming",
+            "mode": "selected",
+        },
+    )["data"]
+    donor = service.call(
+        "capture_trace_activations",
+        {
+            "trace_id": control_trace_id,
+            "model": {"kind": "local_hf", "path": str(checkpoint)},
+            "modules": [module],
+            "positions": positions,
+            "position_semantics": "consuming",
+            "mode": "selected",
+        },
+    )["data"]
+    return {
+        "tokens": tokens,
+        "module": module,
+        "positions": positions,
+        "capture": capture,
+        "donor": donor,
+        "plan": plan,
+    }
+
+
+def test_identity_control_on_real_checkpoint(service: ToolService, staged: dict):
+    spec = service.call(
+        "create_activation_intervention",
+        {
+            "name": "real-model identity control",
+            "capture_artifact_id": staged["capture"]["capture_artifact_id"],
+            "module": staged["module"],
+            "positions": staged["positions"],
+            "operation": "identity",
+        },
+    )["data"]
+
+    validation = service.call(
+        "validate_activation_intervention",
+        {
+            "intervention_artifact_id": spec["artifact_id"],
+            "source": {"kind": "local_hf", "path": str(checkpoint)},
+            "token_ids": staged["tokens"],
+        },
+    )["data"]
+    assert validation["valid"] is True, validation
+
+    paired = service.call(
+        "run_paired_intervention",
+        {
+            "intervention_artifact_id": spec["artifact_id"],
+            "source": {"kind": "local_hf", "path": str(checkpoint)},
+            "token_ids": staged["tokens"],
+        },
+    )["data"]
+    assert paired["identity_control"]["passed"] is True
+    assert paired["validity"]["status"] in ("valid", "limited")
+    assert paired["effect"]["logits"]["max_abs"] <= 1e-5
+
+
+def test_bounded_zero_ablation_and_donor_patch(service: ToolService, staged: dict):
+    zero = service.call(
+        "create_activation_intervention",
+        {
+            "name": "real-model zero ablation",
+            "capture_artifact_id": staged["capture"]["capture_artifact_id"],
+            "module": staged["module"],
+            "positions": staged["positions"],
+            "operation": "zero",
+        },
+    )["data"]
+    zero_pair = service.call(
+        "run_paired_intervention",
+        {
+            "intervention_artifact_id": zero["artifact_id"],
+            "source": {"kind": "local_hf", "path": str(checkpoint)},
+            "token_ids": staged["tokens"],
+            "logit_positions": [staged["tokens"].__len__() - 1],
+        },
+    )["data"]
+    assert zero_pair["identity_control"]["passed"] is True
+    assert zero_pair["validity"]["status"] in ("valid", "limited")
+    assert zero_pair["effect"]["target_activation"]["after"]["l2_norm"] == 0.0
+
+    patch = service.call(
+        "create_activation_intervention",
+        {
+            "name": "real-model donor patch",
+            "capture_artifact_id": staged["capture"]["capture_artifact_id"],
+            "module": staged["module"],
+            "positions": staged["positions"],
+            "operation": "patch",
+            "donor_capture_artifact_id": staged["donor"]["capture_artifact_id"],
+            "donor_positions": staged["positions"],
+            "donor_condition": "alternative-input",
+        },
+    )["data"]
+    patch_pair = service.call(
+        "run_paired_intervention",
+        {
+            "intervention_artifact_id": patch["artifact_id"],
+            "source": {"kind": "local_hf", "path": str(checkpoint)},
+            "token_ids": staged["tokens"],
+        },
+    )["data"]
+    assert patch_pair["identity_control"]["passed"] is True
+    assert patch_pair["effect"]["target_activation"]["max_abs"] > 0
+
+
+def test_parameters_unchanged_and_continuation_is_bounded(
+    service: ToolService, staged: dict
+):
+    from wsp.replay.sources import ReplayModelSource, load_replay_source
+
+    model = load_replay_source(
+        ReplayModelSource(kind="local_hf", path=str(checkpoint), compute_file_sha256=False)
+    )
+    module = model.module if hasattr(model, "module") else model.model
+    before = {
+        name: parameter.detach().clone()
+        for name, parameter in module.named_parameters()
+    }
+
+    prefix_length = min(4, len(staged["tokens"]))
+    prefix = staged["tokens"][:prefix_length]
+    spec = service.call(
+        "create_activation_intervention",
+        {
+            "name": "real-model continuation ablation",
+            "module": staged["module"],
+            "positions": [prefix_length - 1],
+            "operation": "zero",
+            "model": {"name": "local-hf"},
+            "sequence_length": prefix_length,
+        },
+    )["data"]
+    continuation = service.call(
+        "run_counterfactual_continuation",
+        {
+            "intervention_artifact_id": spec["artifact_id"],
+            "source": {"kind": "local_hf", "path": str(checkpoint)},
+            "token_ids": prefix,
+            "max_new_tokens": 2,
+        },
+    )["data"]
+    assert continuation["comparison"]["identity_agreement"] == "exact"
+    assert continuation["validity"]["status"] in ("valid", "limited")
+    baseline_condition = next(
+        item for item in continuation["conditions"] if item["condition"] == "baseline"
+    )
+    assert baseline_condition["termination_reason"] in (
+        "eos",
+        "max_new_tokens",
+        "max_sequence_length",
+    )
+
+    after = {
+        name: parameter.detach().clone()
+        for name, parameter in module.named_parameters()
+    }
+    assert before.keys() == after.keys()
+    for name in before:
+        assert before[name].equal(after[name]), name

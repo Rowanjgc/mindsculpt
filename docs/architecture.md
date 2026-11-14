@@ -33,6 +33,7 @@ in the domain modules.
 | `wsp.replay` | Replay plans, teacher-forced execution, verification, replay model adapters |
 | `wsp.alignment` | Token alignment and behavioral span resolution |
 | `wsp.investigation` | Capture points, positioned capture backends, measurement building, comparisons, evidence |
+| `wsp.interventions` | Intervention specs, slice selection/application, reversible execution hooks, paired measurement, uncached continuations |
 | `wsp.tools` | Pydantic tool schemas, operation registry, shared `ToolService` |
 | `wsp.cli` | Typer commands; every command prints the service’s JSON envelope |
 | `wsp.adapters` | Optional model and format adapters: local Hugging Face, INIF 0.1, Inspect AI logs |
@@ -191,6 +192,10 @@ All schemas are versioned and JSON-compatible.
 | `wsp.activation-vector/1.0` | Retained activation vector artifact metadata |
 | `wsp.capture-comparison/1.0` | Numerical comparison of two captures |
 | `wsp.investigation-evidence/1.0` | Measurement chain attached to a case |
+| `wsp.activation-intervention/1.0` | Versioned, machine-readable activation intervention |
+| `wsp.intervention-result/1.0` | One measured execution condition |
+| `wsp.counterfactual-comparison/1.0` | Paired baseline/identity/intervention measurement |
+| `wsp.continuation-comparison/1.0` | Paired greedy continuation comparison |
 
 ### Replay, alignment, and measurement
 
@@ -223,6 +228,46 @@ compatibility, then computes metrics from the shared tensor-difference
 implementation. `attach_investigation_evidence` packages the resulting chain —
 findings, replays, alignments, spans, captures, comparisons, and unverified
 hypotheses — as one artifact that a failure case can reference and export.
+
+### Causal intervention and continuation
+
+An intervention specification (`wsp.activation-intervention/1.0`) is data, not
+code. It names the model identity, the replay/execution identity, the
+instrumentation backend, one module and tensor role, the token positions and
+position semantics, the selected feature slice, the operation (`zero`, `mean`,
+`patch`, `identity`), the replacement source, and explicit resource limits.
+`mean` and `patch` sources carry provenance: a donor capture (module, role,
+positions, model fingerprints) or an explicitly supplied mean with
+`token_alignment` and source captures/traces. Nothing is inferred silently.
+
+Execution uses the generic PyTorch forward-hook backend. A `forward_pre_hook`
+intervenes on module inputs and a `forward_hook` intervenes on module outputs;
+the hook resolves the declared slice, clones the tensor, writes only the selected
+region, and rebuilds the original tuple/mapping structure. Hooks are removed in
+`finally`; the model's training flag is restored and a parameter fingerprint is
+compared before and after every pass, so a run that mutates weights raises
+instead of returning numbers. The optional nnterp backend remains
+capture-only in V1.3 and is rejected for interventions rather than silently
+substituted.
+
+`run_paired_intervention` executes the untouched baseline, an identity
+intervention, and the requested intervention under identical weights, tokens,
+masks, dtype, backend, and inference settings, with an optional fourth
+alternative control. The identity control is mandatory by default: bitwise
+equality reports `exact`; a tolerance comparison can report `within_tolerance`;
+anything else marks the experiment `invalid` and is never auto-corrected. The
+comparison artifact reports targeted slice before/after statistics, propagation
+into downstream module rows, selected logits, token log-probability deltas, and
+effect sizes, and states plainly that an observed effect is not proof of a causal
+circuit.
+
+`run_counterfactual_continuation` is a separate execution mode, not an implicit
+extension of teacher-forced replay: greedy, uncached, full-prefix decoding with
+the intervention applied during the first prefix forward only. It records prefix
+ids, decoding configuration, seeds, per-condition generated ids, termination
+reasons, longest common prefix, first divergence, and identity-control
+agreement. Baseline and identity must match under deterministic conditions or
+the experiment is marked invalid.
 
 ### Workspace layout
 
@@ -281,6 +326,14 @@ accepts overrides. Unknown budget keys are rejected rather than ignored.
 | `max_contrast_variants` | 16 | variations per contrast |
 | `max_case_traces` | 64 | trace references in a case |
 | `max_import_traces` | 64 | traces per imported document |
+| `max_intervention_elements` | 500,000 | intervened slice elements |
+| `max_intervention_positions` | 128 | selected positions per intervention |
+| `max_intervention_applications` | 16 | applications per execution |
+| `max_intervention_logit_elements` | 2,000,000 | selected logit rows per comparison |
+| `max_counterfactual_modules` | 16 | downstream modules measured |
+| `max_counterfactual_rows` | 256 | logit positions compared |
+| `max_continuation_tokens` | 64 | generated tokens per continuation |
+| `max_continuation_sequence_tokens` | 4,096 | full-prefix sequence length |
 | `max_output_bytes` | 2,000,000 | serialized tool envelopes |
 | `max_artifact_bytes` | 268,435,456 | one stored artifact |
 

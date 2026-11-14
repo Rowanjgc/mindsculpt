@@ -27,7 +27,7 @@ cause, a confirmed detector hit, or a weight edit.
 | `annotations` | Human notes with author and kind |
 | `hypotheses` | Explicitly labelled candidate explanations |
 | `activation_captures` | `ArtifactRef` records for V1 hook activation evidence |
-| `investigations` | `InvestigationLink` records pointing at investigation-evidence artifacts |
+| `investigations` | `InvestigationLink` records pointing at investigation-evidence artifacts. Each link carries `intervention_ids` and `continuation_ids` alongside `capture_ids` and `comparison_ids` |
 | `patches` | Patch or patch-set references |
 | `tags` | Free-form labels for filtering |
 | `metadata` | Additional structured information |
@@ -148,9 +148,11 @@ patches/patch sets are restored through the existing workspace store.
 Investigation evidence is exported as a *graph*, not as one file. A private
 export walks the evidence record and embeds everything it reaches — capture
 records, retained activation vectors, replay plans and results, token alignments,
-span resolutions, and comparisons — so the restored case can reproduce the same
-measurements. A redacted export keeps only the capture and comparison artifacts,
-because replay results and alignments embed recorded token text.
+span resolutions, comparisons, intervention specifications and results, and
+continuation comparisons — so the restored case can reproduce the same
+measurements. A redacted export follows only the capture, comparison,
+intervention, and continuation references, because replay results and alignments
+embed recorded token text and inline donor activations are sensitive.
 
 `import_failure_case` verifies:
 
@@ -194,6 +196,27 @@ replaced, and every replaced string is remembered.
 - retained activation vectors and their checksums,
 - provenance notes, environment metadata, warnings, and serialized errors.
 
+Intervention and continuation artifacts are transformed by the same redaction
+system:
+
+- intervention specs keep structural fields (module path, role, position
+  semantics, selected positions, operation, shape, dtype, limits) but lose the
+  human-written name and notes, mean/donor inline values, mean/donor artifact
+  references, and replay/alignment artifact links;
+- intervention results keep numerical statistics and structural enums, but lose
+  per-token log-probabilities and model names/paths;
+- counterfactual comparisons keep effect sizes and validity status, but lose
+  per-condition artifact ids, top-1 token ids, and model details;
+- continuation comparisons keep lengths, termination reasons, and divergence
+  counts, but lose prefix token ids, generated token ids and decoded text,
+  log-probabilities, and intervention-event detail.
+
+All transformed artifacts are re-serialized, their checksums are reset and
+recomputed, and `artifact_map` records every old-to-new identifier. Free-form
+diagnostic text (validity reasons, check details, identity-control detail) is
+scrubbed by the same transformer, so a failed experiment cannot leak a prompt
+through its error message.
+
 Redacted exports rewrite nested artifacts rather than copying them: contrast
 results, activation captures, patch payloads, and patch provenance are
 transformed, their bytes are re-checksummed, and their artifact identifiers are
@@ -205,6 +228,16 @@ After serialization the whole document is scanned for every removed string and
 for any caller-supplied `sensitive_markers`. A single hit is a hard error: the
 export is refused and no file is written. The scan is a backstop for the
 transformer, not a substitute for it.
+
+Short removed values (fewer than eight characters) are checked by exact equality
+against every decoded JSON string and key, not skipped. Explicit
+`sensitive_markers` are checked as substrings at any length, including
+Unicode-normalized forms and bounded base64-decoded content. Identifier-shaped
+short values are not searched as substrings unless declared as markers, because
+doing so would flag unrelated structural text; declare them explicitly when they
+are sensitive. Unknown encodings, paraphrases, and undeclared markers cannot be
+guaranteed absent, and artifacts that cannot be transformed safely are refused
+or omitted.
 
 Limitations are recorded in the bundle (`privacy.limitations` and
 `case.redaction`), and the export says that replay capability is reduced. When

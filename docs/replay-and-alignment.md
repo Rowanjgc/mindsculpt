@@ -252,3 +252,9 @@ turns a local window into a claimed equivalent measurement.
   setting adds an explicit limitation.
 - Whether a measurement is causal. Replay and alignment locate *states*; they do
   not attribute effects.
+
+Replay is deliberately `use_cache=False` and teacher-forced. Causal
+interventions are a separate layer built on these artifacts; see
+`docs/causal-interventions.md`. Controlled continuations use an explicit
+uncached, full-prefix mode and never claim cached-generation compatibility; see
+`docs/counterfactual-continuations.md`.

@@ -10,11 +10,13 @@ The workbench deliberately separates five things. Do not collapse them.
 1. **Observations** — traces, detector findings, imported logs.
 2. **Numerical measurements** — replay verification, captures, comparisons.
 3. **Hypotheses** — human-authored statements, always `unverified`.
-4. **Causal interventions** — not implemented in V1.2.
+4. **Causal interventions** — V1.3, separate specifications and paired
+   measurements (`docs/causal-interventions.md`).
 5. **Weight edits** — V1 patches, separate artifacts.
 
 V1.2 ships the infrastructure for 1–3. It never generates 3 automatically and
-never claims 4.
+never claims 4. V1.3 adds 4 without merging it into measurement or weight
+editing.
 
 ## The investigation chain
 
@@ -270,12 +272,12 @@ round-trips byte-for-byte. See `docs/failure-cases.md` for the policy itself.
 
 ## What V1.2 does not do
 
-- No activation patching, no ablation, no counterfactual continuation. The
-  capture layer exposes `consuming`/`predicting` states and immutable artifacts,
-  which is the substrate those experiments need, but the interventions are not
-  implemented.
 - No automatic mechanism discovery, circuit localisation, or neuron labelling.
   A dimension is a dimension; a label belongs in a hypothesis.
 - No generation-time activation recording. Measurement happens on a
   teacher-forced replay of recorded tokens.
 - No GPU-specific paths. The baseline is CPU.
+
+V1.3 adds the controlled-intervention layer on top of these captures. See
+`docs/causal-interventions.md` for intervention semantics and
+`docs/counterfactual-continuations.md` for bounded generation-time comparisons.
