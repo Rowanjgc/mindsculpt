@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Workbench data is intentionally not tracked by default.
+.wsp/
+*.wsp/
+
+# Local checkpoints and generated examples
+*.safetensors
+*.bin
+*.pt
+*.pth
+examples/out/
+examples/*.safetensors
+
+# Editor
+.idea/
+.vscode/
+.DS_Store
