@@ -62,6 +62,7 @@ class Budget(BaseModel):
     max_capture_artifacts: int = Field(default=64, gt=0)
     max_comparison_elements: int = Field(default=20_000_000, gt=0)
     max_activation_scan_captures: int = Field(default=64, gt=0)
+    max_case_artifacts: int = Field(default=2048, gt=0)
 
     # Structured output
     max_output_bytes: int = Field(default=2_000_000, gt=0)

@@ -20,6 +20,7 @@ from typing import Any
 from wsp.core.errors import SafetyError
 from wsp.core.time import utc_now_iso
 from wsp.workspace.privacy import (
+    is_dropped_kind,
     REDACTED,
     ExportPolicy,
     RemovedText,
@@ -258,15 +259,28 @@ def dropped_trace_checksums(payload: dict[str, Any]) -> list[str]:
 def collect_artifact_ids(value: Any) -> set[str]:
     found: set[str] = set()
     if isinstance(value, dict):
-        artifact_id = value.get("artifact_id")
-        if isinstance(artifact_id, str) and artifact_id.startswith("a_"):
-            found.add(artifact_id)
-        for item in value.values():
+        for key, item in value.items():
+            # Both the schema's ``artifact_id`` field and the qualified forms
+            # used by measurement records (``value_artifact_id``,
+            # ``plan_artifact_id``, ...) are references to stored artifacts.
+            if isinstance(item, str) and (key == "artifact_id" or key.endswith("_artifact_id")):
+                if item.startswith("a_"):
+                    found.add(item)
             found.update(collect_artifact_ids(item))
     elif isinstance(value, list):
         for item in value:
             found.update(collect_artifact_ids(item))
     return found
+
+
+#: Transform order for artifacts that reference other artifacts.
+_REFERENCE_RANK = {
+    "activation_vector": 0,
+    "activation_values": 0,
+    "trace_capture": 1,
+    "capture_comparison": 2,
+    "investigation_evidence": 3,
+}
 
 
 def rewrite_artifact_ids(
@@ -279,10 +293,34 @@ def rewrite_artifact_ids(
 ) -> dict[str, ArtifactRewrite]:
     """Transform each linked artifact once and describe where it moved."""
 
-    rewrites: dict[str, ArtifactRewrite] = {}
+    # References form a small DAG (captures -> comparisons -> evidence).  A
+    # transformed record must point at the transformed ids of the records it
+    # references, so transform referents first and remap as we go.
+    ranked: list[tuple[int, str, Any, Any]] = []
     for artifact_id in sorted(artifact_ids):
         ref, path = artifacts.get(artifact_id)
+        ranked.append((_REFERENCE_RANK.get(ref.kind, 0), artifact_id, ref, path))
+
+    rewrites: dict[str, ArtifactRewrite] = {}
+    for _rank, artifact_id, ref, path in sorted(ranked, key=lambda item: (item[0], item[1])):
+        if policy.redacted and is_dropped_kind(ref.kind):
+            # A retained activation vector cannot be redacted: its content is the
+            # measurement.  Drop it and say so, rather than exporting it or
+            # failing every redacted export that contains a selected capture.
+            rewrites[artifact_id] = ArtifactRewrite(
+                old_id=artifact_id, ref=None, kind=ref.kind, format=ref.format, data=None
+            )
+            limitations.append(
+                f"retained numeric artifact {artifact_id} ({ref.kind}) was dropped: "
+                "activation values cannot be redacted, so this export carries its "
+                "summary statistics only"
+            )
+            continue
         data = path.read_bytes()
+        remap = {
+            old_id: (rewrite.ref["artifact_id"] if rewrite.ref else None)
+            for old_id, rewrite in rewrites.items()
+        }
         try:
             kind, format_name, new_data = transform_artifact(
                 kind=ref.kind,
@@ -290,6 +328,7 @@ def rewrite_artifact_ids(
                 data=data,
                 policy=policy,
                 removed=removed,
+                remap=remap,
             )
         except SafetyError:
             if policy.on_untransformable_artifact == "omit":
@@ -337,7 +376,7 @@ def _apply_rewrites(value: Any, rewrites: dict[str, ArtifactRewrite]) -> Any:
             return dict(rewrite.ref)
     result: dict[str, Any] = {}
     for key, item in value.items():
-        if key == "artifact_id" and isinstance(item, str):
+        if isinstance(item, str) and (key == "artifact_id" or key.endswith("_artifact_id")):
             rewrite = rewrites.get(item)
             if rewrite is not None:
                 result[key] = rewrite.ref["artifact_id"] if rewrite.ref else None
@@ -471,6 +510,17 @@ def redact_case_payload(
         patches.append(patch)
     case["patches"] = patches
 
+    investigations: list[dict[str, Any]] = []
+    for link in _sequence(case.get("investigations")):
+        if not isinstance(link, dict):
+            continue
+        link = _mapping(link)
+        _drop_key(link, "title", removed)
+        link["title"] = f"redacted evidence {link.get('evidence_id', '')}".strip()
+        _drop_key(link, "note", removed)
+        investigations.append(link)
+    case["investigations"] = investigations
+
     case["tags"] = removed.scrub_soft_list(case.get("tags"))
     case["metadata"] = removed.scrub_soft(case.get("metadata"))
     case["warnings"] = _scrub_strings(case.get("warnings"), removed)
@@ -483,8 +533,14 @@ def redact_case(
     *,
     policy: ExportPolicy,
     artifacts: Any,
+    extra_artifact_ids: Iterable[str] = (),
 ) -> RedactedCase:
-    """Redact a case payload and every artifact it references."""
+    """Redact a case payload and every artifact it references.
+
+    ``extra_artifact_ids`` lets a caller include artifacts reachable through
+    evidence records that are not part of the case payload itself, so that every
+    transformed record is produced in one pass with a consistent id mapping.
+    """
 
     if not policy.redacted:
         return RedactedCase(payload=dict(payload), removed=RemovedText(), limitations=[])
@@ -493,7 +549,7 @@ def redact_case(
     limitations: list[str] = []
     case = redact_case_payload(payload, policy, removed)
     rewrites = rewrite_artifact_ids(
-        collect_artifact_ids(case),
+        collect_artifact_ids(case) | {str(item) for item in extra_artifact_ids},
         policy=policy,
         artifacts=artifacts,
         removed=removed,

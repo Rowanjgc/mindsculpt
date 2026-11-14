@@ -32,6 +32,7 @@ from wsp.behavior.models import (
     CaseSummary,
     FailureCase,
     GenerationTrace,
+    InvestigationLink,
 )
 from wsp.behavior.redaction import (
     ArtifactRewrite,
@@ -44,7 +45,13 @@ from wsp.behavior.redaction import (
 )
 from wsp.behavior.trace import TraceStore
 from wsp.core.budget import Budget, enforce_bytes
-from wsp.core.errors import ArtifactError, InputError, NotFoundError, SafetyError
+from wsp.core.errors import (
+    ArtifactError,
+    InputError,
+    NotFoundError,
+    ResourceLimitError,
+    SafetyError,
+)
 from wsp.core.hashing import sha256_bytes
 from wsp.core.json import atomic_write_bytes, canonical_bytes, dumps, read_json, to_jsonable
 from wsp.core.time import utc_now_iso
@@ -124,11 +131,64 @@ class CaseStore:
                     )
         for artifact in case.activation_captures:
             self.workspace.artifacts.verify(artifact)
+        for link in case.investigations:
+            self._validate_investigation(link, case)
         for patch_reference in case.patches:
             if patch_reference.patch_id is not None:
                 self.workspace.load_patch(patch_reference.patch_id)
             if patch_reference.patchset_id is not None:
                 self.workspace.load_patchset(patch_reference.patchset_id)
+
+    def _validate_investigation(self, link: InvestigationLink, case: FailureCase) -> None:
+        """An investigation link must resolve to a consistent evidence record."""
+
+        ref, _path = self.workspace.artifacts.get(link.artifact_id)
+        if ref.kind != "investigation_evidence":
+            raise ArtifactError(
+                "investigation link does not point at an investigation evidence record",
+                details={"artifact_id": link.artifact_id, "kind": ref.kind},
+            )
+        payload = self.workspace.artifacts.read_json(link.artifact_id)
+        if not isinstance(payload, dict):
+            raise ArtifactError(
+                "investigation evidence is not a JSON object",
+                details={"artifact_id": link.artifact_id},
+            )
+        if payload.get("evidence_id") != link.evidence_id:
+            raise ArtifactError(
+                "investigation evidence identifier does not match its artifact",
+                details={
+                    "artifact_id": link.artifact_id,
+                    "expected": link.evidence_id,
+                    "found": payload.get("evidence_id"),
+                },
+            )
+        recorded_case = payload.get("case_id")
+        if recorded_case is not None and recorded_case != case.case_id:
+            raise ArtifactError(
+                "investigation evidence belongs to a different case",
+                details={"case_id": case.case_id, "recorded": recorded_case},
+            )
+        for capture in payload.get("captures") or []:
+            artifact_id = capture.get("artifact_id")
+            if artifact_id is None:
+                continue
+            capture_ref, _path = self.workspace.artifacts.get(artifact_id)
+            if capture_ref.kind != "trace_capture":
+                raise ArtifactError(
+                    "investigation references an artifact that is not a trace capture",
+                    details={"artifact_id": artifact_id, "kind": capture_ref.kind},
+                )
+        for comparison in payload.get("comparisons") or []:
+            artifact_id = comparison.get("artifact_id")
+            if artifact_id is None:
+                continue
+            comparison_ref, _path = self.workspace.artifacts.get(artifact_id)
+            if comparison_ref.kind != "capture_comparison":
+                raise ArtifactError(
+                    "investigation references an artifact that is not a capture comparison",
+                    details={"artifact_id": artifact_id, "kind": comparison_ref.kind},
+                )
 
     def save(self, case: FailureCase) -> tuple[Path, str]:
         if not CASE_ID_PATTERN.match(case.case_id):
@@ -296,6 +356,86 @@ def _patch_set_payload_scrub(
     return payload
 
 
+def _investigation_artifact_ids(
+    artifacts: Any,
+    case_payload: dict[str, Any],
+    *,
+    policy: ExportPolicy,
+    budget: Budget,
+) -> set[str]:
+    """Collect the artifacts reachable from a case's investigation evidence.
+
+    In private mode the whole referenced graph is included, so the exported case
+    is complete.  In redacted mode only capture and comparison artifacts are
+    followed: replay results, token alignments, and span resolutions embed
+    recorded token text and are deliberately excluded from a redacted export.
+    """
+
+    found: set[str] = set()
+    limit = int(getattr(budget, "max_case_artifacts", 2048))
+    pending: list[str] = []
+    for link in case_payload.get("investigations") or []:
+        if not isinstance(link, dict):
+            continue
+        evidence_id = link.get("artifact_id")
+        if isinstance(evidence_id, str) and evidence_id.startswith("a_"):
+            pending.append(evidence_id)
+            found.add(evidence_id)
+
+    if not policy.redacted:
+        # Full fidelity: follow the whole referenced graph (capture records
+        # reference their retained vectors, alignments, and replay results).
+        while pending:
+            artifact_id = pending.pop()
+            try:
+                payload = artifacts.read_json(artifact_id)
+            except Exception:
+                continue
+            for nested in collect_artifact_ids(payload):
+                if nested not in found:
+                    found.add(nested)
+                    pending.append(nested)
+            if len(found) > limit:
+                raise ResourceLimitError(
+                    "the investigation evidence graph is too large to export in one case",
+                    details={"artifacts": len(found), "limit": limit},
+                )
+        return found
+
+    for artifact_id in list(found):
+        try:
+            evidence = artifacts.read_json(artifact_id)
+        except Exception:
+            continue
+        if not isinstance(evidence, dict):
+            continue
+        for key in ("captures", "comparisons"):
+            for reference in evidence.get(key) or []:
+                if not isinstance(reference, dict):
+                    continue
+                nested = reference.get("artifact_id")
+                if isinstance(nested, str) and nested.startswith("a_"):
+                    found.add(nested)
+
+    # Retained activation vectors cannot be redacted, so they are dropped.  Add
+    # them anyway so the export records the omission explicitly instead of
+    # silently losing the reference.
+    for artifact_id in list(found):
+        try:
+            record = artifacts.read_json(artifact_id)
+        except Exception:
+            continue
+        if not isinstance(record, dict):
+            continue
+        for measurement in record.get("measurements") or []:
+            if not isinstance(measurement, dict):
+                continue
+            vector_id = measurement.get("value_artifact_id")
+            if isinstance(vector_id, str) and vector_id.startswith("a_"):
+                found.add(vector_id)
+    return found
+
+
 def build_export(
     case: FailureCase,
     *,
@@ -322,11 +462,21 @@ def build_export(
     limitations: list[str] = []
     checksums_dropped: list[str] = []
 
+    # Walk the *original* case payload: after redaction the link ids have already
+    # been rewritten to ids that only exist inside this export.
+    investigation_ids = _investigation_artifact_ids(
+        artifacts,
+        case.model_dump(mode="json"),
+        policy=policy,
+        budget=budget,
+    )
+
     if policy.redacted:
         redacted: RedactedCase = redact_case(
             case.model_dump(mode="json"),
             policy=policy,
             artifacts=artifacts,
+            extra_artifact_ids=investigation_ids,
         )
         case_payload = redacted.payload
         removed = redacted.removed
@@ -400,7 +550,11 @@ def build_export(
                 }
             )
 
-    needed_ids = collect_artifact_ids(case.model_dump(mode="json")) | patch_artifact_ids
+    needed_ids = (
+        collect_artifact_ids(case.model_dump(mode="json"))
+        | patch_artifact_ids
+        | investigation_ids
+    )
     missing = sorted(needed_ids - set(rewrites))
     if missing:
         if policy.redacted:
@@ -495,6 +649,7 @@ def build_export(
         "activation_captures": activation_entries,
         "patches": patch_payloads,
         "payload_artifacts": entries_for(sorted(patch_artifact_ids)),
+        "investigation_artifacts": entries_for(sorted(investigation_ids)),
         "artifact_map": artifact_map,
         "references": {
             "traces": reference_traces,
@@ -503,6 +658,9 @@ def build_export(
                 item["artifact_id"] for item in activation_entries
             ],
             "patches": list(case_payload.get("patches") or []),
+            "investigation_artifact_ids": [
+                item["artifact_id"] for item in entries_for(sorted(investigation_ids))
+            ],
         },
         "warnings": warnings,
     }
@@ -556,6 +714,7 @@ def _import_artifacts(
         ("contrast_results", "contrast_result"),
         ("activation_captures", "activation_capture"),
         ("payload_artifacts", "patch_payload"),
+        ("investigation_artifacts", "investigation_evidence"),
     ):
         for entry in payload.get(section, []) or []:
             if not isinstance(entry, dict):

@@ -673,6 +673,287 @@ def _redact_activation_capture(
     return payload
 
 
+_TRACE_CAPTURE_KEEP_FIELDS = frozenset(
+    {
+        "schema_version",
+        "capture_id",
+        "created_at",
+        "trace_id",
+        "trace_artifact_sha256",
+        "plan_id",
+        "replay_id",
+        "alignment_id",
+        "model_file_sha256",
+        "model_structure_fingerprint",
+        "model_parameter_count",
+        "backend",
+        "backend_version",
+        "device",
+        "dtype",
+        "mode",
+        "position_semantics",
+        "position_semantics_note",
+        "requested_tokens",
+        "positions",
+        "modules",
+        "include_inputs",
+        "first_call_only",
+        "sequence_length",
+        "measurements",
+        "measurements_truncated",
+        "modules_summary",
+        "resources",
+        "replay_verification",
+        "limitations",
+    }
+)
+
+
+def _redact_trace_capture(
+    payload: dict[str, Any], policy: ExportPolicy, removed: RemovedText
+) -> dict[str, Any]:
+    """``wsp.trace-capture/1.0``: keep measurements, drop retained vectors.
+
+    A capture record is a measurement, so its statistics and module identity are
+    scientific content that a redacted export should keep.  Retained vectors are
+    raw activations derived from the source prompt; they are dropped, and the
+    record says so instead of silently reporting values it no longer carries.
+    Links to replay and alignment artifacts are dropped too, because those
+    artifacts are not part of a redacted export.
+    """
+
+    payload = dict(payload)
+    payload["model_name"] = safe_display_name(payload.get("model_name"), removed)
+    for key in ("alignment_artifact_id", "span_artifact_id", "replay_artifact_id"):
+        if key in payload:
+            payload[key] = None
+
+    measurements: list[Any] = []
+    for measurement in payload.get("measurements") or []:
+        if not isinstance(measurement, dict):
+            continue
+        item = dict(measurement)
+        removed.drop(item.get("values"))
+        item["values"] = None
+        removed.take(item.get("value_sha256"))
+        item["value_sha256"] = None
+        if item.get("value_artifact_id") is not None:
+            item["value_artifact_id"] = None
+            item["retained"] = False
+            item["retained_numel"] = 0
+            item["retained_shape"] = None
+            notes = list(item.get("notes") or [])
+            notes.append("retained values were removed by export redaction")
+            item["notes"] = notes
+        item["notes"] = removed.scrub_string_list(item.get("notes"))
+        measurements.append(item)
+    payload["measurements"] = measurements
+
+    summaries: list[Any] = []
+    for summary in payload.get("modules_summary") or []:
+        if not isinstance(summary, dict):
+            continue
+        item = dict(summary)
+        item["notes"] = removed.scrub_string_list(item.get("notes"))
+        summaries.append(item)
+    payload["modules_summary"] = summaries
+
+    resources = payload.get("resources")
+    if isinstance(resources, dict):
+        resources = dict(resources)
+        resources["elements_retained"] = 0
+        resources["estimated_retained_bytes"] = 0
+        resources["artifacts"] = 0
+        payload["resources"] = resources
+
+    verification = payload.get("replay_verification")
+    if isinstance(verification, dict):
+        verification = dict(verification)
+        agreement = verification.get("agreement")
+        if isinstance(agreement, dict):
+            agreement = dict(agreement)
+            removed.drop(agreement.get("per_token"))
+            agreement["per_token"] = []
+            agreement["per_token_truncated"] = True
+            verification["agreement"] = agreement
+        payload["replay_verification"] = verification
+
+    privacy = payload.get("privacy")
+    if isinstance(privacy, dict):
+        privacy = dict(privacy)
+        privacy["contains_activation_values"] = False
+        privacy["note"] = removed.scrub_soft(privacy.get("note"))
+        payload["privacy"] = privacy
+
+    unavailable = payload.get("unavailable")
+    unavailable = dict(unavailable) if isinstance(unavailable, dict) else {}
+    unavailable["retained_values"] = (
+        "retained activation vectors were removed by export redaction"
+    )
+    unavailable["cross_references"] = (
+        "links to replay and alignment artifacts were removed because those artifacts "
+        "are not part of a redacted export"
+    )
+    payload["unavailable"] = unavailable
+
+    payload["warnings"] = removed.scrub_string_list(payload.get("warnings"))
+    payload["checksums"] = {}
+    payload["metadata"] = removed.scrub_soft(payload.get("metadata"))
+    for key in list(payload):
+        if key in _TRACE_CAPTURE_KEEP_FIELDS or key in {
+            "model_name",
+            "warnings",
+            "checksums",
+            "metadata",
+            "privacy",
+            "unavailable",
+        }:
+            continue
+        payload[key] = removed.scrub_soft(payload[key])
+    return payload
+
+
+def _redact_capture_comparison(
+    payload: dict[str, Any], policy: ExportPolicy, removed: RemovedText
+) -> dict[str, Any]:
+    """``wsp.capture-comparison/1.0``: keep metrics, drop supplied directions."""
+
+    payload = dict(payload)
+    removed.drop(payload.get("direction"))
+    payload["direction"] = None
+    payload["direction_note"] = removed.scrub_soft(payload.get("direction_note"))
+
+    alignment = payload.get("alignment")
+    if isinstance(alignment, dict):
+        alignment = dict(alignment)
+        pairs: list[Any] = []
+        for pair in alignment.get("pairs") or []:
+            if not isinstance(pair, dict):
+                continue
+            item = dict(pair)
+            item["note"] = removed.scrub_soft(item.get("note"))
+            pairs.append(item)
+        alignment["pairs"] = pairs
+        alignment["note"] = removed.scrub_soft(alignment.get("note"))
+        payload["alignment"] = alignment
+
+    entries: list[Any] = []
+    for entry in payload.get("entries") or []:
+        if not isinstance(entry, dict):
+            continue
+        item = dict(entry)
+        metrics: list[Any] = []
+        for metric in item.get("metrics") or []:
+            if not isinstance(metric, dict):
+                continue
+            value = dict(metric)
+            value["note"] = removed.scrub_soft(value.get("note"))
+            metrics.append(value)
+        item["metrics"] = metrics
+        item["warnings"] = removed.scrub_string_list(item.get("warnings"))
+        entries.append(item)
+    payload["entries"] = entries
+
+    compatibility = payload.get("compatibility")
+    if isinstance(compatibility, dict):
+        compatibility = dict(compatibility)
+        compatibility["notes"] = removed.scrub_string_list(compatibility.get("notes"))
+        payload["compatibility"] = compatibility
+
+    payload["warnings"] = removed.scrub_string_list(payload.get("warnings"))
+    payload["metadata"] = removed.scrub_soft(payload.get("metadata"))
+    return payload
+
+
+def _redact_investigation_evidence(
+    payload: dict[str, Any], policy: ExportPolicy, removed: RemovedText
+) -> dict[str, Any]:
+    """``wsp.investigation-evidence/1.0``: keep the measurement graph only."""
+
+    payload = dict(payload)
+    removed.drop(payload.get("title"))
+    payload["title"] = REDACTED
+    removed.drop(payload.get("summary"))
+    payload["summary"] = None
+    payload["notes"] = removed.scrub_string_list(payload.get("notes"))
+
+    findings: list[Any] = []
+    for finding in payload.get("findings") or []:
+        if not isinstance(finding, dict):
+            continue
+        item = dict(finding)
+        item["value"] = removed.scrub_deep(item.get("value"))
+        item["note"] = removed.scrub_soft(item.get("note"))
+        findings.append(item)
+    payload["findings"] = findings
+
+    replays: list[Any] = []
+    for replay in payload.get("replays") or []:
+        if not isinstance(replay, dict):
+            continue
+        item = dict(replay)
+        item["plan_artifact_id"] = None
+        item["result_artifact_id"] = None
+        item["note"] = removed.scrub_soft(item.get("note"))
+        replays.append(item)
+    payload["replays"] = replays
+
+    # Alignments and span resolutions carry decoded prompt and generation text,
+    # so a redacted export keeps their identifiers (if any) and drops the links.
+    payload["alignments"] = []
+    payload["spans"] = []
+
+    captures: list[Any] = []
+    for capture in payload.get("captures") or []:
+        if not isinstance(capture, dict):
+            continue
+        item = dict(capture)
+        item["note"] = removed.scrub_soft(item.get("note"))
+        captures.append(item)
+    payload["captures"] = captures
+
+    comparisons: list[Any] = []
+    for comparison in payload.get("comparisons") or []:
+        if not isinstance(comparison, dict):
+            continue
+        item = dict(comparison)
+        item["note"] = removed.scrub_soft(item.get("note"))
+        comparisons.append(item)
+    payload["comparisons"] = comparisons
+
+    hypotheses: list[Any] = []
+    for hypothesis in payload.get("hypotheses") or []:
+        if not isinstance(hypothesis, dict):
+            continue
+        item = dict(hypothesis)
+        removed.drop(item.get("statement"))
+        item["statement"] = REDACTED
+        removed.drop(item.get("rationale"))
+        item["rationale"] = None
+        item["proposed_by"] = None
+        hypotheses.append(item)
+    payload["hypotheses"] = hypotheses
+
+    privacy = payload.get("privacy")
+    if isinstance(privacy, dict):
+        privacy = dict(privacy)
+        privacy["contains_source_text"] = False
+        privacy["note"] = removed.scrub_soft(privacy.get("note"))
+        payload["privacy"] = privacy
+
+    limitations = list(payload.get("limitations") or [])
+    limitations.append(
+        "this redacted evidence record keeps numerical measurement references only; "
+        "token alignments, span resolutions, replay artifacts, and retained activation "
+        "vectors were removed"
+    )
+    payload["limitations"] = limitations
+    payload["warnings"] = removed.scrub_string_list(payload.get("warnings"))
+    payload["checksums"] = {}
+    payload["metadata"] = removed.scrub_soft(payload.get("metadata"))
+    return payload
+
+
 def _redact_artifact_json_generic(
     payload: dict[str, Any], policy: ExportPolicy, removed: RemovedText
 ) -> dict[str, Any]:
@@ -705,10 +986,47 @@ def _redact_npy(payload: bytes, policy: ExportPolicy, removed: RemovedText) -> t
 #: weight delta; it is derived from a checkpoint, not from user text.
 RAW_NUMERIC_KINDS = frozenset({"patch_payload"})
 
+#: Numeric kinds that cannot be redacted at all because their content *is* the
+#: sensitive measurement.  A retained activation vector is derived from the
+#: source prompt; there is no way to remove the text from it.  A redacted export
+#: therefore drops these artifacts and records that it did.
+DERIVED_NUMERIC_KINDS = frozenset({"activation_vector", "activation_values"})
+
+
+def is_dropped_kind(kind: str) -> bool:
+    """Whether a redacted export must drop artifacts of this kind."""
+
+    return kind in DERIVED_NUMERIC_KINDS
+
 JSON_TRANSFORMERS: dict[str, Callable[..., dict[str, Any]]] = {
     "contrast_result": _redact_contrast_result,
     "activation_capture": _redact_activation_capture,
+    "trace_capture": _redact_trace_capture,
+    "capture_comparison": _redact_capture_comparison,
+    "investigation_evidence": _redact_investigation_evidence,
 }
+
+
+def _artifact_model(kind: str) -> Any:
+    """Return the strict model an artifact kind is written with, if known."""
+
+    if kind == "contrast_result":
+        from wsp.behavior.models import ContrastResult
+
+        return ContrastResult
+    if kind == "trace_capture":
+        from wsp.investigation.models import TraceCaptureRecord
+
+        return TraceCaptureRecord
+    if kind == "capture_comparison":
+        from wsp.investigation.compare import CaptureComparison
+
+        return CaptureComparison
+    if kind == "investigation_evidence":
+        from wsp.investigation.evidence import InvestigationEvidence
+
+        return InvestigationEvidence
+    return None
 
 
 def _validate_artifact_payload(kind: str, payload: dict[str, Any]) -> None:
@@ -720,12 +1038,11 @@ def _validate_artifact_payload(kind: str, payload: dict[str, Any]) -> None:
     or edited outside the workbench, and redaction cannot be guaranteed.
     """
 
-    if kind != "contrast_result":
+    model = _artifact_model(kind)
+    if model is None:
         return
-    from wsp.behavior.models import ContrastResult
-
     try:
-        ContrastResult.model_validate(payload)
+        model.model_validate(payload)
     except Exception as exc:
         raise SafetyError(
             "a linked contrast result does not match its schema, so redaction "
@@ -738,6 +1055,28 @@ def _validate_artifact_payload(kind: str, payload: dict[str, Any]) -> None:
         ) from exc
 
 
+def substitute_artifact_references(value: Any, mapping: dict[str, str | None]) -> Any:
+    """Replace artifact references with the ids they have in the export.
+
+    An artifact's own bytes determine its exported id, so a transformed record
+    that references another transformed record cannot carry the original id.
+    Callers transform referenced artifacts first and pass the accumulated
+    mapping here.
+    """
+
+    if isinstance(value, dict):
+        result: dict[str, Any] = {}
+        for key, item in value.items():
+            if isinstance(item, str) and (key == "artifact_id" or key.endswith("_artifact_id")):
+                result[key] = mapping.get(item, item)
+                continue
+            result[key] = substitute_artifact_references(item, mapping)
+        return result
+    if isinstance(value, list):
+        return [substitute_artifact_references(item, mapping) for item in value]
+    return value
+
+
 def transform_artifact(
     *,
     kind: str,
@@ -745,6 +1084,7 @@ def transform_artifact(
     data: bytes,
     policy: ExportPolicy,
     removed: RemovedText,
+    remap: dict[str, str | None] | None = None,
 ) -> tuple[str, str, bytes]:
     """Return ``(kind, format, bytes)`` for one linked artifact.
 
@@ -767,6 +1107,8 @@ def transform_artifact(
             _validate_artifact_payload(kind, payload)
         transformer = JSON_TRANSFORMERS.get(kind, _redact_artifact_json_generic)
         new_payload, new_format = _transform_json_payload(payload, policy, removed, transformer)
+        if remap:
+            new_payload = substitute_artifact_references(new_payload, remap)
         return kind, new_format, canonical_bytes(to_jsonable(new_payload))
     if kind in RAW_NUMERIC_KINDS:
         return kind, format_name, data

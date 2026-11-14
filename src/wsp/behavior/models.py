@@ -604,6 +604,22 @@ class CaseHypothesis(StrictModel):
     evidence_refs: list[str] = Field(default_factory=list)
 
 
+class InvestigationLink(StrictModel):
+    """A pointer from a failure case to a stored investigation record.
+
+    The link carries only what is needed to render and redact a case listing.
+    The measurements themselves stay in their own artifacts.
+    """
+
+    evidence_id: str = Field(pattern=r"^inv_[0-9a-f]{16}$")
+    artifact_id: str
+    title: str
+    created_at: str
+    capture_ids: list[str] = Field(default_factory=list)
+    comparison_ids: list[str] = Field(default_factory=list)
+    note: str | None = None
+
+
 class CaseReview(StrictModel):
     status: Literal["open", "triage", "confirmed", "rejected", "archived"] = "open"
     reviewers: list[str] = Field(default_factory=list)
@@ -686,6 +702,7 @@ class FailureCase(StrictModel):
     annotations: list[CaseAnnotation] = Field(default_factory=list)
     hypotheses: list[CaseHypothesis] = Field(default_factory=list)
     activation_captures: list[ArtifactRef] = Field(default_factory=list)
+    investigations: list[InvestigationLink] = Field(default_factory=list)
     patches: list[PatchReference] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -710,6 +727,9 @@ class FailureCase(StrictModel):
         hypothesis_ids = [item.hypothesis_id for item in self.hypotheses]
         if len(set(hypothesis_ids)) != len(hypothesis_ids):
             raise ValueError("hypothesis ids must be unique")
+        evidence_ids = [item.evidence_id for item in self.investigations]
+        if len(set(evidence_ids)) != len(evidence_ids):
+            raise ValueError("investigation evidence ids must be unique")
         return self
 
 

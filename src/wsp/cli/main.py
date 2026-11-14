@@ -579,5 +579,133 @@ def capture(
     _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
 
 
+@app.command("compare-captures")
+def compare_captures(
+    ctx: typer.Context,
+    left: str = typer.Argument(..., help="Left capture artifact id."),
+    right: str = typer.Argument(..., help="Right capture artifact id."),
+    metric: list[str] | None = typer.Option(
+        None, "--metric", help="l2, rel_l2, cosine, dot, max_abs, mean_abs, rms, projection."
+    ),
+    module: list[str] | None = typer.Option(None, "--module", help="Restrict to module paths."),
+    alignment: str = typer.Option(
+        "identical_positions",
+        "--alignment",
+        help="identical_positions, paired_positions, matching_prefix, or semantic_event.",
+    ),
+    pair: list[str] | None = typer.Option(
+        None,
+        "--pair",
+        help="Explicit LEFT:RIGHT position pair; requires --reviewed.",
+    ),
+    reviewed: bool = typer.Option(
+        False,
+        "--reviewed",
+        help="Confirm that explicit pairs or a semantic alignment were reviewed by a human.",
+    ),
+    direction: str | None = typer.Option(None, "--direction", help="JSON list of floats."),
+    allow_different_models: bool = typer.Option(False, "--allow-different-models"),
+    input_json: str | None = typer.Option(
+        None, "--json", help="Full CompareActivationCapturesInput payload."
+    ),
+) -> None:
+    """Compare two stored activation captures numerically."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    if input_json:
+        payload = json.loads(input_json)
+    else:
+        payload = {
+            "left_capture_artifact_id": left,
+            "right_capture_artifact_id": right,
+            "alignment": {"strategy": alignment, "reviewed": reviewed},
+            "allow_different_models": allow_different_models,
+        }
+        if metric:
+            payload["metrics"] = list(metric)
+        if module:
+            payload["modules"] = list(module)
+        if pair:
+            pairs = []
+            for item in pair:
+                left_position, _, right_position = item.partition(":")
+                pairs.append(
+                    {
+                        "left_position": int(left_position),
+                        "right_position": int(right_position),
+                    }
+                )
+            payload["alignment"]["pairs"] = pairs
+        if direction:
+            payload["direction"] = json.loads(direction)
+    envelope = service.call("compare_activation_captures", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("attach-evidence")
+def attach_evidence(
+    ctx: typer.Context,
+    title: str = typer.Option(..., "--title"),
+    case_id: str | None = typer.Option(None, "--case", help="Attach the evidence to a case."),
+    summary: str | None = typer.Option(None, "--summary"),
+    observation: str | None = typer.Option(None, "--observation", help="Observed trace id."),
+    control: list[str] | None = typer.Option(None, "--control", help="Control trace id; repeatable."),
+    capture: list[str] | None = typer.Option(None, "--capture", help="Capture artifact id; repeatable."),
+    comparison: list[str] | None = typer.Option(
+        None, "--comparison", help="Comparison artifact id; repeatable."
+    ),
+    replay: list[str] | None = typer.Option(None, "--replay", help="Replay artifact id; repeatable."),
+    span: list[str] | None = typer.Option(None, "--span", help="Span artifact id; repeatable."),
+    hypothesis: list[str] | None = typer.Option(
+        None, "--hypothesis", help="Statement of an unverified hypothesis; repeatable."
+    ),
+    note: list[str] | None = typer.Option(None, "--note", help="Free note; repeatable."),
+    input_json: str | None = typer.Option(
+        None, "--json", help="Full AttachInvestigationEvidenceInput payload."
+    ),
+) -> None:
+    """Record internal measurements as investigation evidence."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    if input_json:
+        payload = json.loads(input_json)
+    else:
+        payload = {
+            "title": title,
+            "control_trace_ids": list(control or []),
+            "capture_artifact_ids": list(capture or []),
+            "comparison_artifact_ids": list(comparison or []),
+            "replay_artifact_ids": list(replay or []),
+            "span_artifact_ids": list(span or []),
+            "hypotheses": [{"statement": item} for item in hypothesis or []],
+            "notes": list(note or []),
+        }
+        if case_id:
+            payload["case_id"] = case_id
+        if summary:
+            payload["summary"] = summary
+        if observation:
+            payload["observation_trace_id"] = observation
+    envelope = service.call("attach_investigation_evidence", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("inspect-evidence")
+def inspect_evidence(
+    ctx: typer.Context,
+    artifact_id: str = typer.Argument(..., help="Investigation evidence artifact id."),
+    no_records: bool = typer.Option(False, "--no-records", help="Omit referenced record digests."),
+    input_json: str | None = typer.Option(
+        None, "--json", help="Full InspectInvestigationEvidenceInput payload."
+    ),
+) -> None:
+    """Read stored investigation evidence and its integrity status."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    if input_json:
+        payload = json.loads(input_json)
+    else:
+        payload = {"artifact_id": artifact_id, "include_records": not no_records}
+    envelope = service.call("inspect_investigation_evidence", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()
