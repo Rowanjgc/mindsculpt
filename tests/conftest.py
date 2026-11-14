@@ -55,3 +55,63 @@ def workspace(tmp_path: Path) -> Workspace:
 @pytest.fixture
 def input_x() -> list[list[float]]:
     return [[0.1 * (index + 1) for index in range(8)]]
+
+
+@pytest.fixture
+def service(workspace: Workspace):
+    from wsp.tools.service import ToolService
+
+    return ToolService(workspace=workspace, raise_errors=True)
+
+
+@pytest.fixture
+def make_trace(service):
+    def _make(
+        text: str,
+        *,
+        input_text: str | None = None,
+        tokens: list[str] | None = None,
+        token_ids: list[int] | None = None,
+        logprobs: list[float] | None = None,
+        termination: str = "eos",
+        termination_detail: str | None = None,
+        tool_calls: list[dict] | None = None,
+        params: dict | None = None,
+        privacy: dict | None = None,
+        seed: int | None = None,
+    ) -> str:
+        fixture: dict = {
+            "output_text": text,
+            "termination": termination,
+            "termination_detail": termination_detail,
+        }
+        if tokens is not None:
+            fixture["output_tokens"] = [
+                {"text": token, "token_id": (token_ids or [None] * len(tokens))[index]}
+                for index, token in enumerate(tokens)
+            ]
+            if logprobs is not None:
+                fixture["token_logprobs"] = logprobs
+        if tool_calls is not None:
+            fixture["tool_calls"] = tool_calls
+        payload = {
+            "input_text": input_text or "prompt",
+            "backend": {
+                "kind": "scripted",
+                "scripted": {"default_fixture": fixture},
+            },
+            "params": params or {"max_new_tokens": 64},
+            "seed": seed,
+        }
+        if privacy is not None:
+            payload["privacy"] = privacy
+        return service.call("record_trace", payload)["data"]["trace_id"]
+
+    return _make
+
+
+@pytest.fixture
+def trace_store(workspace: Workspace):
+    from wsp.behavior.trace import TraceStore
+
+    return TraceStore(workspace)

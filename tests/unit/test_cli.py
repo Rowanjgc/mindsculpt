@@ -97,3 +97,104 @@ def test_cli_budget_override_is_validated(
     payload = _json(result.stdout)
     assert payload["data"]["preview"]["returned"] <= 2
     assert payload["data"]["preview"]["sampled"] is True
+
+
+def test_cli_behavioral_workflow(tmp_path: Path) -> None:
+    runner = CliRunner()
+    root = tmp_path / "cli-behavior"
+    initialized = runner.invoke(
+        app, ["--workspace", str(root), "init"], catch_exceptions=False
+    )
+    assert initialized.exit_code == 0, initialized.stdout
+
+    recorded = runner.invoke(
+        app,
+        [
+            "--workspace",
+            str(root),
+            "record-trace",
+            "prompt",
+            "--output",
+            "a b c d e f g h a b c d e f g h",
+        ],
+        catch_exceptions=False,
+    )
+    assert recorded.exit_code == 0, recorded.stdout
+    trace_id = _json(recorded.stdout)["data"]["trace_id"]
+
+    scanned = runner.invoke(
+        app,
+        [
+            "--workspace",
+            str(root),
+            "scan-trace",
+            trace_id,
+            "--detector",
+            "core.repetition",
+        ],
+        catch_exceptions=False,
+    )
+    assert scanned.exit_code == 0, scanned.stdout
+    scan_payload = _json(scanned.stdout)
+    assert scan_payload["data"]["scan"]["findings_count"] >= 1
+
+    listed = runner.invoke(
+        app, ["--workspace", str(root), "traces"], catch_exceptions=False
+    )
+    assert listed.exit_code == 0
+    assert _json(listed.stdout)["data"]["returned"] == 1
+
+    detectors = runner.invoke(
+        app, ["--workspace", str(root), "detectors"], catch_exceptions=False
+    )
+    assert detectors.exit_code == 0
+    assert any(
+        item["detector_id"] == "core.repetition"
+        for item in _json(detectors.stdout)["data"]["detectors"]
+    )
+
+    created = runner.invoke(
+        app,
+        [
+            "--workspace",
+            str(root),
+            "call",
+            "create_failure_case",
+            "--json",
+            json.dumps(
+                {
+                    "title": "CLI-created case",
+                    "observations": [trace_id],
+                    "tags": ["cli"],
+                }
+            ),
+        ],
+        catch_exceptions=False,
+    )
+    assert created.exit_code == 0, created.stdout
+    case_id = _json(created.stdout)["data"]["case"]["case_id"]
+
+    inspected = runner.invoke(
+        app,
+        ["--workspace", str(root), "inspect-case", case_id],
+        catch_exceptions=False,
+    )
+    assert inspected.exit_code == 0
+    assert _json(inspected.stdout)["data"]["case"]["case_id"] == case_id
+
+    out = tmp_path / "cli-case.json"
+    exported = runner.invoke(
+        app,
+        [
+            "--workspace",
+            str(root),
+            "export-case",
+            case_id,
+            "--output",
+            str(out),
+        ],
+        catch_exceptions=False,
+    )
+    assert exported.exit_code == 0, exported.stdout
+    assert out.exists()
+    assert _json(out.read_text(encoding="utf-8"))["schema_version"] == "wsp.case-export/1.0"
