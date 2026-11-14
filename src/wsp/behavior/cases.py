@@ -70,6 +70,18 @@ class CaseStore:
                         "contrast reference does not point at a contrast result",
                         details={"artifact_id": reference.artifact_id, "kind": ref.kind},
                     )
+                payload = self.workspace.artifacts.read_json(reference.artifact_id)
+                if isinstance(payload, dict) and payload.get("result_id") not in (
+                    None,
+                    reference.result_id,
+                ):
+                    raise ArtifactError(
+                        "contrast result identifier does not match its artifact",
+                        details={
+                            "artifact_id": reference.artifact_id,
+                            "expected": reference.result_id,
+                        },
+                    )
         for artifact in case.activation_captures:
             self.workspace.artifacts.verify(artifact)
         for patch_reference in case.patches:
