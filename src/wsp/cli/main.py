@@ -781,5 +781,393 @@ def inspect_evidence(
     _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
 
 
+def _token_ids(raw: str | None) -> list[int] | None:
+    if not raw:
+        return None
+    return [int(item) for item in raw.split(",") if item.strip()]
+
+
+def _execution_payload(
+    *,
+    intervention: str | None,
+    input_json: str | None,
+    source: str | None,
+    tokens: str | None,
+    trace: str | None,
+) -> dict[str, Any]:
+    if input_json:
+        return json.loads(input_json)
+    payload: dict[str, Any] = {}
+    if intervention:
+        payload["intervention_artifact_id"] = intervention
+    if source:
+        payload["source"] = json.loads(source)
+    token_ids = _token_ids(tokens)
+    if token_ids is not None:
+        payload["token_ids"] = token_ids
+    if trace:
+        payload["trace_id"] = trace
+    return payload
+
+
+@app.command("create-activation-intervention")
+def create_activation_intervention(
+    ctx: typer.Context,
+    name: str = typer.Option(..., "--name"),
+    capture: str | None = typer.Option(
+        None, "--capture", help="Capture artifact the target activation was measured in."
+    ),
+    module: str = typer.Option(..., "--module", help="Module path, e.g. blocks.1."),
+    operation: str = typer.Option(
+        "identity", "--operation", help="identity, zero, mean, or patch."
+    ),
+    position: list[int] | None = typer.Option(
+        None, "--position", help="Sequence position to intervene on; repeatable."
+    ),
+    semantics: str = typer.Option(
+        "consuming", "--semantics", help="consuming or predicting."
+    ),
+    role: str = typer.Option("output", "--role", help="input or output."),
+    axis: int | None = typer.Option(None, "--axis", help="Tensor axis holding sequence positions."),
+    feature_start: int | None = typer.Option(None, "--feature-start"),
+    feature_end: int | None = typer.Option(None, "--feature-end"),
+    feature_index: list[int] | None = typer.Option(
+        None, "--feature-index", help="Explicit feature index; repeatable."
+    ),
+    tensor_name: str | None = typer.Option(None, "--tensor-name"),
+    tensor_index: int | None = typer.Option(None, "--tensor-index"),
+    expected_dtype: str | None = typer.Option(None, "--expected-dtype"),
+    apply_on_call: list[int] | None = typer.Option(
+        None, "--apply-on-call", help="Forward call index; repeatable."
+    ),
+    allow_dtype_cast: bool = typer.Option(False, "--allow-dtype-cast"),
+    donor_capture: str | None = typer.Option(
+        None, "--donor-capture", help="Captured donor activation artifact."
+    ),
+    donor_trace: str | None = typer.Option(None, "--donor-trace"),
+    donor_position: list[int] | None = typer.Option(
+        None, "--donor-position", help="Donor position; repeatable."
+    ),
+    donor_condition: str = typer.Option(
+        "healthy-control", "--donor-condition", help="healthy-control, alternative-input, or other."
+    ),
+    donor_values: str | None = typer.Option(None, "--donor-values", help="JSON list of floats."),
+    mean_source_capture: str | None = typer.Option(
+        None, "--mean-source-capture", help="Capture artifact averaged for mean ablation."
+    ),
+    mean_position: list[int] | None = typer.Option(
+        None, "--mean-position", help="Position used for the mean; repeatable."
+    ),
+    mean_alignment: str | None = typer.Option(
+        None, "--mean-alignment", help="Required explanation of how mean rows align to tokens."
+    ),
+    mean_values: str | None = typer.Option(None, "--mean-values", help="JSON list of floats."),
+    sequence_length: int | None = typer.Option(None, "--sequence-length"),
+    save: bool = typer.Option(True, "--save/--no-save"),
+    input_json: str | None = typer.Option(
+        None, "--json", help="Full CreateActivationInterventionInput payload."
+    ),
+) -> None:
+    """Create a versioned activation-intervention specification."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    if input_json:
+        payload = json.loads(input_json)
+    else:
+        payload = {
+            "name": name,
+            "module": module,
+            "operation": operation,
+            "tensor_role": role,
+            "position_semantics": semantics,
+            "positions": list(position or []),
+            "apply_on_calls": list(apply_on_call or [0]),
+            "allow_dtype_cast": allow_dtype_cast,
+            "save": save,
+        }
+        if capture:
+            payload["capture_artifact_id"] = capture
+        if axis is not None:
+            payload["axis"] = axis
+        if feature_start is not None:
+            payload["feature_start"] = feature_start
+        if feature_end is not None:
+            payload["feature_end"] = feature_end
+        if feature_index:
+            payload["feature_indices"] = list(feature_index)
+        if tensor_name:
+            payload["tensor_name"] = tensor_name
+        if tensor_index is not None:
+            payload["tensor_index"] = tensor_index
+        if expected_dtype:
+            payload["expected_dtype"] = expected_dtype
+        if sequence_length is not None:
+            payload["sequence_length"] = sequence_length
+        if donor_capture:
+            payload["donor_capture_artifact_id"] = donor_capture
+        if donor_trace:
+            payload["donor_trace_id"] = donor_trace
+        if donor_position:
+            payload["donor_positions"] = list(donor_position)
+        if donor_values:
+            payload["donor_values"] = json.loads(donor_values)
+        payload["donor_condition"] = donor_condition
+        if mean_source_capture:
+            payload["mean_source_capture_artifact_id"] = mean_source_capture
+        if mean_position:
+            payload["mean_positions"] = list(mean_position)
+        if mean_alignment:
+            payload["mean_token_alignment"] = mean_alignment
+        if mean_values:
+            payload["mean_values"] = json.loads(mean_values)
+    envelope = service.call("create_activation_intervention", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("validate-activation-intervention")
+def validate_activation_intervention(
+    ctx: typer.Context,
+    intervention: str | None = typer.Option(None, "--intervention", help="Artifact id."),
+    source: str | None = typer.Option(None, "--source", help="JSON replay model source."),
+    tokens: str | None = typer.Option(None, "--tokens", help="Comma-separated token ids."),
+    trace: str | None = typer.Option(None, "--trace", help="Trace id to take tokens from."),
+    input_json: str | None = typer.Option(None, "--json", help="Full request payload."),
+) -> None:
+    """Check that an intervention can be applied to a concrete execution."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    payload = _execution_payload(
+        intervention=intervention, input_json=input_json, source=source, tokens=tokens, trace=trace
+    )
+    envelope = service.call("validate_activation_intervention", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("preview-activation-intervention")
+def preview_activation_intervention(
+    ctx: typer.Context,
+    intervention: str | None = typer.Option(None, "--intervention", help="Artifact id."),
+    source: str | None = typer.Option(None, "--source", help="JSON replay model source."),
+    tokens: str | None = typer.Option(None, "--tokens", help="Comma-separated token ids."),
+    trace: str | None = typer.Option(None, "--trace", help="Trace id to take tokens from."),
+    input_json: str | None = typer.Option(None, "--json", help="Full request payload."),
+) -> None:
+    """Show the human-readable and structured scope of an intervention."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    payload = _execution_payload(
+        intervention=intervention, input_json=input_json, source=source, tokens=tokens, trace=trace
+    )
+    envelope = service.call("preview_activation_intervention", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+def _run_payload(
+    *,
+    intervention: str | None,
+    input_json: str | None,
+    source: str | None,
+    tokens: str | None,
+    trace: str | None,
+    measure_module: list[str] | None,
+    measure_position: list[int] | None,
+    logit_position: list[int] | None,
+) -> dict[str, Any]:
+    payload = _execution_payload(
+        intervention=intervention, input_json=input_json, source=source, tokens=tokens, trace=trace
+    )
+    if measure_module:
+        payload["measure_modules"] = list(measure_module)
+    if measure_position:
+        payload["measure_positions"] = list(measure_position)
+    if logit_position:
+        payload["logit_positions"] = list(logit_position)
+    return payload
+
+
+@app.command("run-activation-intervention")
+def run_activation_intervention(
+    ctx: typer.Context,
+    intervention: str | None = typer.Option(None, "--intervention", help="Artifact id."),
+    source: str | None = typer.Option(None, "--source", help="JSON replay model source."),
+    tokens: str | None = typer.Option(None, "--tokens", help="Comma-separated token ids."),
+    trace: str | None = typer.Option(None, "--trace", help="Trace id to take tokens from."),
+    measure_module: list[str] | None = typer.Option(None, "--measure-module"),
+    measure_position: list[int] | None = typer.Option(None, "--measure-position"),
+    logit_position: list[int] | None = typer.Option(None, "--logit-position"),
+    input_json: str | None = typer.Option(None, "--json", help="Full request payload."),
+) -> None:
+    """Run one intervention during a single teacher-forced forward pass."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    payload = _run_payload(
+        intervention=intervention,
+        input_json=input_json,
+        source=source,
+        tokens=tokens,
+        trace=trace,
+        measure_module=measure_module,
+        measure_position=measure_position,
+        logit_position=logit_position,
+    )
+    envelope = service.call("run_activation_intervention", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("run-paired-intervention")
+def run_paired_intervention(
+    ctx: typer.Context,
+    intervention: str | None = typer.Option(None, "--intervention", help="Artifact id."),
+    source: str | None = typer.Option(None, "--source", help="JSON replay model source."),
+    tokens: str | None = typer.Option(None, "--tokens", help="Comma-separated token ids."),
+    trace: str | None = typer.Option(None, "--trace", help="Trace id to take tokens from."),
+    measure_module: list[str] | None = typer.Option(None, "--measure-module"),
+    measure_position: list[int] | None = typer.Option(None, "--measure-position"),
+    logit_position: list[int] | None = typer.Option(None, "--logit-position"),
+    alternative: str | None = typer.Option(
+        None, "--alternative", help="Alternative-control intervention artifact id."
+    ),
+    direction: str | None = typer.Option(None, "--direction", help="JSON list of floats."),
+    no_identity: bool = typer.Option(False, "--no-identity", help="Skip the identity control."),
+    identity_atol: float = typer.Option(1e-6, "--identity-atol"),
+    identity_rtol: float = typer.Option(1e-5, "--identity-rtol"),
+    input_json: str | None = typer.Option(None, "--json", help="Full request payload."),
+) -> None:
+    """Run baseline, identity control, and intervention as one paired experiment."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    payload = _run_payload(
+        intervention=intervention,
+        input_json=input_json,
+        source=source,
+        tokens=tokens,
+        trace=trace,
+        measure_module=measure_module,
+        measure_position=measure_position,
+        logit_position=logit_position,
+    )
+    payload["identity"] = not no_identity
+    payload["identity_atol"] = identity_atol
+    payload["identity_rtol"] = identity_rtol
+    if alternative:
+        payload["alternative_intervention_artifact_id"] = alternative
+    if direction:
+        payload["direction"] = json.loads(direction)
+    envelope = service.call("run_paired_intervention", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("compare-intervention-results")
+def compare_intervention_results(
+    ctx: typer.Context,
+    artifact_id: str = typer.Argument(..., help="Counterfactual comparison artifact id."),
+    no_records: bool = typer.Option(False, "--no-records", help="Omit per-result records."),
+    input_json: str | None = typer.Option(None, "--json", help="Full request payload."),
+) -> None:
+    """Inspect a stored paired intervention comparison."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    payload = (
+        json.loads(input_json)
+        if input_json
+        else {"comparison_artifact_id": artifact_id, "include_result_records": not no_records}
+    )
+    envelope = service.call("compare_intervention_results", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("run-counterfactual-continuation")
+def run_counterfactual_continuation(
+    ctx: typer.Context,
+    intervention: str | None = typer.Option(None, "--intervention", help="Artifact id."),
+    source: str | None = typer.Option(None, "--source", help="JSON replay model source."),
+    tokens: str | None = typer.Option(None, "--tokens", help="Comma-separated prefix token ids."),
+    trace: str | None = typer.Option(None, "--trace", help="Trace id to take prefix tokens from."),
+    max_new_tokens: int = typer.Option(8, "--max-new-tokens"),
+    max_sequence_length: int = typer.Option(2048, "--max-sequence-length"),
+    eos_token_id: int | None = typer.Option(None, "--eos-token-id"),
+    seed: int = typer.Option(0, "--seed"),
+    no_identity: bool = typer.Option(False, "--no-identity"),
+    input_json: str | None = typer.Option(None, "--json", help="Full request payload."),
+) -> None:
+    """Run baseline, identity, and intervention greedy continuations from a shared prefix."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    if input_json:
+        payload = json.loads(input_json)
+    else:
+        payload = _execution_payload(
+            intervention=intervention,
+            input_json=None,
+            source=source,
+            tokens=tokens,
+            trace=trace,
+        )
+        payload.update(
+            {
+                "max_new_tokens": max_new_tokens,
+                "max_sequence_length": max_sequence_length,
+                "seed": seed,
+                "identity": not no_identity,
+            }
+        )
+        if eos_token_id is not None:
+            payload["eos_token_id"] = eos_token_id
+    envelope = service.call("run_counterfactual_continuation", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("inspect-counterfactual-comparison")
+def inspect_counterfactual_comparison(
+    ctx: typer.Context,
+    artifact_id: str = typer.Argument(..., help="Comparison or continuation artifact id."),
+    no_records: bool = typer.Option(False, "--no-records", help="Omit full records."),
+    input_json: str | None = typer.Option(None, "--json", help="Full request payload."),
+) -> None:
+    """Read a paired comparison or continuation comparison with integrity checks."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    payload = (
+        json.loads(input_json)
+        if input_json
+        else {"artifact_id": artifact_id, "include_records": not no_records}
+    )
+    envelope = service.call("inspect_counterfactual_comparison", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("attach-intervention-evidence")
+def attach_intervention_evidence(
+    ctx: typer.Context,
+    title: str = typer.Option(..., "--title"),
+    case_id: str | None = typer.Option(None, "--case", help="Attach the evidence to a case."),
+    summary: str | None = typer.Option(None, "--summary"),
+    observation: str | None = typer.Option(None, "--observation", help="Observed trace id."),
+    control: list[str] | None = typer.Option(None, "--control", help="Control trace id; repeatable."),
+    intervention: list[str] | None = typer.Option(None, "--intervention"),
+    comparison: list[str] | None = typer.Option(None, "--comparison"),
+    continuation: list[str] | None = typer.Option(None, "--continuation"),
+    capture: list[str] | None = typer.Option(None, "--capture"),
+    hypothesis: list[str] | None = typer.Option(None, "--hypothesis"),
+    note: list[str] | None = typer.Option(None, "--note"),
+    input_json: str | None = typer.Option(None, "--json", help="Full request payload."),
+) -> None:
+    """Attach intervention and continuation evidence to a failure case."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    if input_json:
+        payload = json.loads(input_json)
+    else:
+        payload = {
+            "title": title,
+            "control_trace_ids": list(control or []),
+            "intervention_artifact_ids": list(intervention or []),
+            "comparison_artifact_ids": list(comparison or []),
+            "continuation_artifact_ids": list(continuation or []),
+            "capture_artifact_ids": list(capture or []),
+            "hypotheses": [{"statement": item} for item in hypothesis or []],
+            "notes": list(note or []),
+        }
+        if case_id:
+            payload["case_id"] = case_id
+        if summary:
+            payload["summary"] = summary
+        if observation:
+            payload["observation_trace_id"] = observation
+    envelope = service.call("attach_intervention_evidence", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()

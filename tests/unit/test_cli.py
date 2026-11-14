@@ -198,3 +198,92 @@ def test_cli_behavioral_workflow(tmp_path: Path) -> None:
     assert exported.exit_code == 0, exported.stdout
     assert out.exists()
     assert _json(out.read_text(encoding="utf-8"))["schema_version"] == "wsp.case-export/1.1"
+
+
+def test_cli_intervention_workflow(tmp_path: Path) -> None:
+    runner = CliRunner()
+    root = tmp_path / "cli-intervention"
+    initialized = runner.invoke(
+        app, ["--workspace", str(root), "init"], catch_exceptions=False
+    )
+    assert initialized.exit_code == 0, initialized.stdout
+
+    created = runner.invoke(
+        app,
+        [
+            "--workspace",
+            str(root),
+            "create-activation-intervention",
+            "--name",
+            "cli zero ablation",
+            "--module",
+            "blocks.1",
+            "--operation",
+            "zero",
+            "--position",
+            "1",
+            "--position",
+            "2",
+            "--sequence-length",
+            "4",
+            "--json",
+            json.dumps(
+                {
+                    "name": "cli zero ablation",
+                    "module": "blocks.1",
+                    "operation": "zero",
+                    "positions": [1, 2],
+                    "position_semantics": "consuming",
+                    "tensor_role": "output",
+                    "model": {"name": "tiny"},
+                    "sequence_length": 4,
+                    "apply_on_calls": [0],
+                }
+            ),
+        ],
+        catch_exceptions=False,
+    )
+    assert created.exit_code == 0, created.stdout
+    intervention_id = _json(created.stdout)["data"]["artifact_id"]
+
+    previewed = runner.invoke(
+        app,
+        [
+            "--workspace",
+            str(root),
+            "preview-activation-intervention",
+            "--intervention",
+            intervention_id,
+            "--source",
+            '{"kind": "synthetic"}',
+            "--tokens",
+            "1,5,6,7",
+        ],
+        catch_exceptions=False,
+    )
+    assert previewed.exit_code == 0, previewed.stdout
+    assert _json(previewed.stdout)["data"]["valid"] is True
+
+    paired = runner.invoke(
+        app,
+        [
+            "--workspace",
+            str(root),
+            "run-paired-intervention",
+            "--intervention",
+            intervention_id,
+            "--source",
+            '{"kind": "synthetic"}',
+            "--tokens",
+            "1,5,6,7",
+            "--measure-module",
+            "blocks.2",
+            "--logit-position",
+            "2",
+        ],
+        catch_exceptions=False,
+    )
+    assert paired.exit_code == 0, paired.stdout
+    payload = _json(paired.stdout)["data"]
+    assert payload["identity_control"]["agreement"] == "exact"
+    assert payload["validity"]["status"] == "valid"

@@ -189,6 +189,26 @@ class CaseStore:
                     "investigation references an artifact that is not a capture comparison",
                     details={"artifact_id": artifact_id, "kind": comparison_ref.kind},
                 )
+        for intervention in payload.get("interventions") or []:
+            artifact_id = intervention.get("artifact_id")
+            if artifact_id is None:
+                continue
+            intervention_ref, _path = self.workspace.artifacts.get(artifact_id)
+            if intervention_ref.kind != "activation_intervention":
+                raise ArtifactError(
+                    "investigation references an artifact that is not an activation intervention",
+                    details={"artifact_id": artifact_id, "kind": intervention_ref.kind},
+                )
+        for continuation in payload.get("continuations") or []:
+            artifact_id = continuation.get("artifact_id")
+            if artifact_id is None:
+                continue
+            continuation_ref, _path = self.workspace.artifacts.get(artifact_id)
+            if continuation_ref.kind != "continuation_comparison":
+                raise ArtifactError(
+                    "investigation references an artifact that is not a continuation comparison",
+                    details={"artifact_id": artifact_id, "kind": continuation_ref.kind},
+                )
 
     def save(self, case: FailureCase) -> tuple[Path, str]:
         if not CASE_ID_PATTERN.match(case.case_id):
@@ -366,9 +386,10 @@ def _investigation_artifact_ids(
     """Collect the artifacts reachable from a case's investigation evidence.
 
     In private mode the whole referenced graph is included, so the exported case
-    is complete.  In redacted mode only capture and comparison artifacts are
-    followed: replay results, token alignments, and span resolutions embed
-    recorded token text and are deliberately excluded from a redacted export.
+    is complete.  In redacted mode only capture, comparison, intervention, and
+    continuation artifacts are followed: replay results, token alignments, and
+    span resolutions embed recorded token text and are deliberately excluded
+    from a redacted export.
     """
 
     found: set[str] = set()
@@ -409,7 +430,7 @@ def _investigation_artifact_ids(
             continue
         if not isinstance(evidence, dict):
             continue
-        for key in ("captures", "comparisons"):
+        for key in ("captures", "comparisons", "interventions", "continuations"):
             for reference in evidence.get(key) or []:
                 if not isinstance(reference, dict):
                     continue
@@ -671,8 +692,16 @@ def build_export(
         ]
 
     encoded = dumps(to_jsonable(bundle))
-    needles = list(removed.values) + list(policy.sensitive_markers)
-    enforce_no_leaks(encoded, needles, what=f"{policy.mode} case export")
+    if policy.redacted:
+        # A private export intentionally retains the original text, including any
+        # string the caller declared sensitive.  Only the redacted mode makes a
+        # no-leak guarantee, so only that mode is scanned.
+        enforce_no_leaks(
+            encoded,
+            list(removed.values),
+            markers=list(policy.sensitive_markers),
+            what=f"{policy.mode} case export",
+        )
     enforce_bytes(len(encoded), budget.max_artifact_bytes, what="case export")
     return bundle
 

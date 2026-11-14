@@ -516,6 +516,7 @@ class ToolService:
         from wsp.tools.alignment_handlers import register_alignment_tools
         from wsp.tools.behavior_handlers import register_behavior_tools
         from wsp.tools.capture_handlers import register_capture_tools
+        from wsp.tools.intervention_handlers import register_intervention_tools
         from wsp.tools.investigation_handlers import register_investigation_tools
         from wsp.tools.replay_handlers import register_replay_tools
 
@@ -524,6 +525,7 @@ class ToolService:
         register_alignment_tools(self)
         register_capture_tools(self)
         register_investigation_tools(self)
+        register_intervention_tools(self)
 
     # ------------------------------------------------------------------- handlers
 

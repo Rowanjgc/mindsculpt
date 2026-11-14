@@ -31,6 +31,7 @@ EVIDENCE_LIMITATIONS = [
     "measurements in this record are numerical observations under a specific replay configuration; they are not causal claims",
     "hypotheses are human-authored and explicitly unverified until an intervention tests them",
     "weight edits, if referenced, are separate artifacts and are not implied by any measurement here",
+    "an intervention effect is reported under the recorded conditions; it does not identify a circuit or prove a mechanism",
 ]
 
 
@@ -101,6 +102,36 @@ class ComparisonRef(StrictModel):
     note: str | None = None
 
 
+class InterventionRef(StrictModel):
+    """A reference to one executed activation intervention and its measurements."""
+
+    intervention_id: str
+    artifact_id: str
+    operation: Literal["zero", "mean", "patch", "identity"] = "zero"
+    module: str | None = None
+    tensor_role: Literal["input", "output"] | None = None
+    position_semantics: Literal["consuming", "predicting"] | None = None
+    positions: list[int] = Field(default_factory=list)
+    comparison_artifact_id: str | None = None
+    validity_status: Literal["valid", "limited", "invalid", "not-run"] = "not-run"
+    identity_agreement: Literal["exact", "within_tolerance", "failed", "not-performed"] | None = None
+    note: str | None = None
+
+
+class ContinuationRef(StrictModel):
+    """A reference to one controlled continuation experiment."""
+
+    continuation_id: str
+    artifact_id: str
+    intervention_id: str | None = None
+    validity_status: Literal["valid", "limited", "invalid", "not-run"] = "not-run"
+    identity_agreement: Literal["exact", "failed", "not-performed"] | None = None
+    first_divergence: int | None = Field(default=None, ge=0)
+    length_delta: int | None = None
+    termination_changed: bool | None = None
+    note: str | None = None
+
+
 class HypothesisNote(StrictModel):
     """A candidate explanation.  Always unverified until an intervention runs."""
 
@@ -128,6 +159,8 @@ class InvestigationEvidence(StrictModel):
     spans: list[ArtifactLink] = Field(default_factory=list)
     captures: list[CaptureRef] = Field(default_factory=list)
     comparisons: list[ComparisonRef] = Field(default_factory=list)
+    interventions: list[InterventionRef] = Field(default_factory=list)
+    continuations: list[ContinuationRef] = Field(default_factory=list)
     hypotheses: list[HypothesisNote] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
     stages: list[EvidenceStage] = Field(
@@ -141,9 +174,17 @@ class InvestigationEvidence(StrictModel):
 
     @model_validator(mode="after")
     def _coherent(self) -> "InvestigationEvidence":
-        if not (self.findings or self.replays or self.captures or self.comparisons):
+        if not (
+            self.findings
+            or self.replays
+            or self.captures
+            or self.comparisons
+            or self.interventions
+            or self.continuations
+        ):
             raise ValueError(
-                "an investigation record needs at least one finding, replay, capture, or comparison"
+                "an investigation record needs at least one finding, replay, capture, "
+                "comparison, intervention, or continuation"
             )
         comparison_ids = [item.comparison_id for item in self.comparisons]
         if len(set(comparison_ids)) != len(comparison_ids):
@@ -151,6 +192,12 @@ class InvestigationEvidence(StrictModel):
         capture_ids = [item.capture_id for item in self.captures]
         if len(set(capture_ids)) != len(capture_ids):
             raise ValueError("capture ids must be unique")
+        intervention_ids = [item.intervention_id for item in self.interventions]
+        if len(set(intervention_ids)) != len(intervention_ids):
+            raise ValueError("intervention ids must be unique")
+        continuation_ids = [item.continuation_id for item in self.continuations]
+        if len(set(continuation_ids)) != len(continuation_ids):
+            raise ValueError("continuation ids must be unique")
         hypothesis_ids = [item.hypothesis_id for item in self.hypotheses]
         if len(set(hypothesis_ids)) != len(hypothesis_ids):
             raise ValueError("hypothesis ids must be unique")
@@ -177,6 +224,14 @@ class InvestigationEvidence(StrictModel):
     @property
     def comparison_ids(self) -> list[str]:
         return [item.comparison_id for item in self.comparisons]
+
+    @property
+    def intervention_ids(self) -> list[str]:
+        return [item.intervention_id for item in self.interventions]
+
+    @property
+    def continuation_ids(self) -> list[str]:
+        return [item.continuation_id for item in self.continuations]
 
 
 def evidence_checksum(record: InvestigationEvidence) -> str:
@@ -209,6 +264,8 @@ def build_evidence(
     spans: list[ArtifactLink] | None = None,
     captures: list[CaptureRef] | None = None,
     comparisons: list[ComparisonRef] | None = None,
+    interventions: list[InterventionRef] | None = None,
+    continuations: list[ContinuationRef] | None = None,
     hypotheses: list[HypothesisNote] | None = None,
     notes: list[str] | None = None,
     warnings: list[str] | None = None,
@@ -230,6 +287,8 @@ def build_evidence(
         spans=list(spans or []),
         captures=list(captures or []),
         comparisons=list(comparisons or []),
+        interventions=list(interventions or []),
+        continuations=list(continuations or []),
         hypotheses=list(hypotheses or []),
         notes=list(notes or []),
         warnings=list(warnings or []),
@@ -253,9 +312,11 @@ __all__ = [
     "ArtifactLink",
     "CaptureRef",
     "ComparisonRef",
+    "ContinuationRef",
     "EvidenceStage",
     "FindingRef",
     "HypothesisNote",
+    "InterventionRef",
     "InvestigationEvidence",
     "ReplayRef",
     "build_evidence",

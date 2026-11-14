@@ -617,6 +617,8 @@ class InvestigationLink(StrictModel):
     created_at: str
     capture_ids: list[str] = Field(default_factory=list)
     comparison_ids: list[str] = Field(default_factory=list)
+    intervention_ids: list[str] = Field(default_factory=list)
+    continuation_ids: list[str] = Field(default_factory=list)
     note: str | None = None
 
 

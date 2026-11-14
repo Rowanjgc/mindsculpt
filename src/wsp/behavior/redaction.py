@@ -281,7 +281,11 @@ _REFERENCE_RANK = {
     "activation_values": 0,
     "trace_capture": 1,
     "capture_comparison": 2,
-    "investigation_evidence": 3,
+    "intervention_result": 2,
+    "activation_intervention": 3,
+    "counterfactual_comparison": 3,
+    "continuation_comparison": 3,
+    "investigation_evidence": 4,
 }
 
 
