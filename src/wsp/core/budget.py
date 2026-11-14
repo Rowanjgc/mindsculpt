@@ -64,6 +64,16 @@ class Budget(BaseModel):
     max_activation_scan_captures: int = Field(default=64, gt=0)
     max_case_artifacts: int = Field(default=2048, gt=0)
 
+    # Controlled interventions and counterfactual continuations
+    max_intervention_elements: int = Field(default=500_000, gt=0)
+    max_intervention_positions: int = Field(default=128, gt=0)
+    max_intervention_applications: int = Field(default=16, gt=0)
+    max_intervention_logit_elements: int = Field(default=2_000_000, gt=0)
+    max_counterfactual_modules: int = Field(default=16, gt=0)
+    max_counterfactual_rows: int = Field(default=256, gt=0)
+    max_continuation_tokens: int = Field(default=64, gt=0)
+    max_continuation_sequence_tokens: int = Field(default=4_096, gt=0)
+
     # Structured output
     max_output_bytes: int = Field(default=2_000_000, gt=0)
     max_artifact_bytes: int = Field(default=268_435_456, gt=0)

@@ -23,9 +23,26 @@ Three guarantees are deliberately separated:
     An export is refused when a linked artifact cannot be transformed without
     either leaking data or silently discarding scientific content.
 
-The scan is a backstop for the transformer, not a substitute for it.  Very
-short values (fewer than ``MIN_SCAN_CHARS`` characters) are removed but not
-searched for, because searching for them would match unrelated structural text.
+The scan is a backstop for the transformer, not a substitute for it.  The exact
+guarantee is:
+
+* every string the transformer removed (at any length) is checked against every
+  JSON string value and mapping key in the serialised export; needles of
+  ``MIN_SCAN_CHARS`` characters or more are additionally searched as substrings
+  and in NFC/NFKC normalised form;
+* strings the caller explicitly supplied as ``sensitive_markers`` are searched
+  as substrings at any length, in the raw text, in normalised text, and in
+  bounded base64-decoded payloads;
+* base64-looking payloads are decoded on a best-effort basis (up to 1 MiB) and
+  rescanned, so a nested encoded record cannot carry a known marker through;
+* text that is not valid JSON is scanned with delimiter-anchored patterns for
+  short needles rather than unanchored substrings.
+
+What this cannot guarantee: a value hidden behind an encoding the scanner does
+not recognise (compression, encryption, a bespoke alphabet), a marker that was
+never declared and never removed, or a semantic paraphrase of sensitive text.
+Those cases require the artifact to be transformed structurally or rejected;
+they are not solved by scanning.
 """
 
 from __future__ import annotations
@@ -34,6 +51,7 @@ import base64
 import hashlib
 import json
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any, Callable, Iterable, Literal, Sequence
 
@@ -116,6 +134,11 @@ class ExportPolicy(BaseModel):
             "measurement payloads are reduced to metadata and summary statistics; "
             "retained activation values are not included"
         )
+        limitations.append(
+            "short removed identifiers are checked by exact equality inside decoded "
+            "JSON values and keys; only explicitly supplied sensitive markers are "
+            "searched as substrings at every length"
+        )
         return limitations
 
 
@@ -130,6 +153,29 @@ def looks_structural(value: str) -> bool:
     """True when a string looks like a machine identifier rather than content."""
 
     return len(value) <= 64 and bool(_IDENTIFIER.match(value))
+
+
+def _scrub_mapping_key(mapping: dict[str, Any], key: str, removed: RemovedText) -> str:
+    """Rename a non-structural key in place so its text cannot leak.
+
+    Structural keys (``layer.0``, ``float32``) are kept so a redacted record still
+    has readable shape.  Anything else is recorded and replaced, with a suffix to
+    keep sibling keys distinct.
+    """
+
+    value = mapping.pop(key)
+    if looks_structural(key):
+        mapping[key] = value
+        return key
+    removed.drop_text(key)
+    safe = REDACTED
+    if safe in mapping:
+        suffix = 2
+        while f"{safe}#{suffix}" in mapping:
+            suffix += 1
+        safe = f"{safe}#{suffix}"
+    mapping[safe] = value
+    return safe
 
 
 class RemovedText:
@@ -151,8 +197,7 @@ class RemovedText:
 
         if isinstance(value, str):
             self.field_count += 1
-            if len(value) >= self.min_scan_chars:
-                self.values.append(value)
+            self._remember(value)
         elif isinstance(value, (list, tuple, set)):
             for item in value:
                 self.drop(item)
@@ -160,11 +205,23 @@ class RemovedText:
             for item in value.values():
                 self.drop(item)
 
+    def _remember(self, value: str | None) -> None:
+        """Record one removed string, whatever its length.
+
+        Short strings are recorded too.  The scanner treats them differently
+        (exact equality inside decoded JSON strings and keys instead of a
+        substring search) rather than dropping them, because a four-character
+        identifier is just as sensitive as a long sentence.
+        """
+
+        if not isinstance(value, str) or value == "":
+            return
+        self.values.append(value)
+
     def drop_text(self, value: str | None) -> None:
         if value is not None:
             self.field_count += 1
-            if len(value) >= self.min_scan_chars:
-                self.values.append(value)
+            self._remember(value)
 
     def scrub(self, value: Any) -> Any:
         """Return a structurally equivalent value with every string removed."""
@@ -181,14 +238,29 @@ class RemovedText:
     def scrub_mapping(self, value: dict[str, Any] | None) -> dict[str, Any]:
         if not value:
             return {}
-        return {str(key): self.scrub(item) for key, item in value.items()}
+        # Mapping *keys* can carry content just as values can.  Structural keys
+        # (``module``, ``position``) survive so the record stays readable; every
+        # other key is replaced and recorded as removed text.
+        result: dict[str, Any] = {}
+        for key, item in value.items():
+            key_text = str(key)
+            if looks_structural(key_text):
+                new_key = key_text
+            else:
+                self._remember(key_text)
+                new_key = REDACTED
+            while new_key in result:
+                new_key = f"{new_key}#{len(result)}"
+            result[new_key] = self.scrub(item)
+        return result
 
     def scrub_deep(self, value: Any) -> Any:
         """Remove every string, including mapping *keys*.
 
         Detector values and evaluation payloads store content in both positions:
         a repetition marker map is ``{"but wait": 8}``.  Keys that look like
-        machine identifiers survive so the structure stays readable.
+        machine identifiers survive so the structure stays readable; every key
+        that is replaced is recorded as removed text.
         """
 
         if isinstance(value, str):
@@ -198,7 +270,11 @@ class RemovedText:
             result: dict[str, Any] = {}
             for key, item in value.items():
                 key_text = str(key)
-                new_key = key_text if looks_structural(key_text) else REDACTED
+                if looks_structural(key_text):
+                    new_key = key_text
+                else:
+                    self._remember(key_text)
+                    new_key = REDACTED
                 if new_key in result and new_key != key_text:
                     new_key = f"{new_key}#{len(result)}"
                 result[new_key] = self.scrub_deep(item)
@@ -214,19 +290,23 @@ class RemovedText:
         values (``"zscore"``, ``"repeat_span"``).  Those are removed anyway, but
         recording them as needles would make the leak scan fire on the enum
         that legitimately remains elsewhere.  Values that look like free text
-        are still recorded.
+        are still recorded, at any length.
         """
 
         if isinstance(value, str):
             self.field_count += 1
-            if not looks_structural(value) and len(value) >= self.min_scan_chars:
-                self.values.append(value)
+            if not looks_structural(value):
+                self._remember(value)
             return REDACTED
         if isinstance(value, dict):
             result: dict[str, Any] = {}
             for key, item in value.items():
                 key_text = str(key)
-                new_key = key_text if looks_structural(key_text) else REDACTED
+                if looks_structural(key_text):
+                    new_key = key_text
+                else:
+                    self._remember(key_text)
+                    new_key = REDACTED
                 if new_key in result and new_key != key_text:
                     new_key = f"{new_key}#{len(result)}"
                 result[new_key] = self.scrub_soft(item)
@@ -255,14 +335,15 @@ class RemovedText:
 
         Names, tags, tensor names, and version strings are removed, but they are
         not recorded as needles: the same identifier legitimately survives in a
-        structural position and would otherwise look like a leak.
+        structural position and would otherwise look like a leak.  Free-text
+        values of any length are recorded.
         """
 
         if value is None:
             return
         self.field_count += 1
-        if not looks_structural(value) and len(value) >= self.min_scan_chars:
-            self.values.append(value)
+        if not looks_structural(value):
+            self._remember(value)
 
     def scrub_soft_list(self, values: Iterable[str] | None) -> list[str]:
         if not values:
@@ -282,47 +363,224 @@ class RemovedText:
 # --------------------------------------------------------------------------- #
 
 
+def _normalized_forms(value: str) -> list[str]:
+    forms = [value]
+    for form in ("NFC", "NFKC"):
+        try:
+            normalized = unicodedata.normalize(form, value)
+        except (TypeError, ValueError):  # pragma: no cover - strings always normalise
+            continue
+        if normalized not in forms:
+            forms.append(normalized)
+    return forms
+
+
 def _candidates(needle: str) -> list[str]:
-    variants = {needle}
-    try:
-        variants.add(json.dumps(needle)[1:-1])
-    except (TypeError, ValueError):  # pragma: no cover - strings always encode
-        pass
+    variants: set[str] = set()
+    for form in _normalized_forms(needle):
+        variants.add(form)
+        try:
+            variants.add(json.dumps(form)[1:-1])
+        except (TypeError, ValueError):  # pragma: no cover - strings always encode
+            pass
     return [variant for variant in variants if variant]
 
 
-def scan_for_leaks(text: str, needles: Iterable[str]) -> list[dict[str, Any]]:
-    """Return a report for every needle that still occurs in ``text``.
+def _json_strings(text: str) -> list[str] | None:
+    """Every string value and mapping key in a JSON document, or ``None``.
+
+    Short needles cannot be searched as substrings without matching unrelated
+    structural text, so they are compared for equality against this list.
+    """
+
+    try:
+        payload = json.loads(text)
+    except (TypeError, ValueError):
+        return None
+    strings: list[str] = []
+
+    def walk(value: Any) -> None:
+        if isinstance(value, str):
+            strings.append(value)
+        elif isinstance(value, dict):
+            for key, item in value.items():
+                strings.append(str(key))
+                walk(item)
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                walk(item)
+
+    walk(payload)
+    return strings
+
+
+_BASE64_TOKEN = re.compile(r"[A-Za-z0-9+/_=-]{24,}")
+_MAX_ENCODED_BYTES = 1_048_576
+
+
+def _encoded_texts(text: str) -> list[str]:
+    """Best-effort decoding of base64-looking strings, bounded in size.
+
+    This covers the common ``data_base64`` payload without pretending to handle
+    every possible encoding.  The guarantees documented in the module docstring
+    are explicit about that boundary.
+    """
+
+    decoded: list[str] = []
+    budget = _MAX_ENCODED_BYTES
+    for match in _BASE64_TOKEN.finditer(text):
+        if budget <= 0:
+            break
+        token = match.group(0)
+        padded = token + "=" * (-len(token) % 4)
+        for decoder in (base64.b64decode, base64.urlsafe_b64decode):
+            try:
+                raw = decoder(padded, validate=False)
+            except (ValueError, TypeError):
+                continue
+            if not raw or len(raw) > budget:
+                continue
+            candidate = raw.decode("utf-8", errors="ignore")
+            if candidate:
+                decoded.append(candidate)
+                budget -= len(raw)
+            break
+    return decoded
+
+
+def _substring_hit(text: str, needle: str) -> int:
+    for candidate in _candidates(needle):
+        position = text.find(candidate)
+        if position >= 0:
+            return position
+    for form in ("NFC", "NFKC"):
+        try:
+            normalized_text = unicodedata.normalize(form, text)
+            normalized_needle = unicodedata.normalize(form, needle)
+        except (TypeError, ValueError):  # pragma: no cover
+            continue
+        position = normalized_text.find(normalized_needle)
+        if position >= 0:
+            return position
+    return -1
+
+
+def _exact_hit(strings: Sequence[str], needle: str) -> bool:
+    targets = set(_normalized_forms(needle))
+    for value in strings:
+        if any(form in targets for form in _normalized_forms(value)):
+            return True
+    return False
+
+
+def _short_needle_pattern(needle: str) -> re.Pattern[str] | None:
+    escaped = re.escape(needle)
+    try:
+        return re.compile(rf"(?<![A-Za-z0-9_.-]){escaped}(?![A-Za-z0-9_.-])")
+    except re.error:  # pragma: no cover - escape makes this safe
+        return None
+
+
+def scan_for_leaks(
+    text: str,
+    needles: Iterable[str],
+    markers: Iterable[str] = (),
+) -> list[dict[str, Any]]:
+    """Return a report for every needle that still survives in ``text``.
+
+    Two classes are distinguished:
+
+    * explicitly supplied ``markers`` are searched as substrings at any length,
+      because the caller declared them sensitive;
+    * automatically collected needles shorter than ``MIN_SCAN_CHARS`` are
+      compared by exact equality against every JSON string value and mapping
+      key, and against decoded base64 payloads.  They are never searched as
+      unanchored substrings, which would match unrelated structural text.
 
     The report deliberately omits the needle.  A privacy failure must not
     reproduce the secret in the error it raises.
     """
 
     findings: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for needle in needles:
-        if not isinstance(needle, str) or len(needle) < MIN_SCAN_CHARS:
-            continue
-        if needle in seen:
-            continue
-        offset = -1
-        for candidate in _candidates(needle):
-            position = text.find(candidate)
-            if position >= 0:
-                offset = position
-                break
-        if offset < 0:
-            continue
-        seen.add(needle)
+    seen: set[tuple[str, str]] = set()
+    decoded_strings = _json_strings(text)
+    encoded_texts: list[str] | None = None
+
+    def encoded() -> list[str]:
+        nonlocal encoded_texts
+        if encoded_texts is None:
+            encoded_texts = _encoded_texts(text)
+        return encoded_texts
+
+    def report(value: str, kind: str, offset: int) -> None:
+        key = (kind, value)
+        if key in seen:
+            return
+        seen.add(key)
         findings.append(
             {
-                "length": len(needle),
-                "sha256_prefix": hashlib.sha256(needle.encode("utf-8")).hexdigest()[
+                "length": len(value),
+                "sha256_prefix": hashlib.sha256(value.encode("utf-8")).hexdigest()[
                     :_REPORT_PREFIX
                 ],
                 "offset": offset,
+                "match": kind,
             }
         )
+
+    for marker in markers:
+        if not isinstance(marker, str) or marker == "":
+            continue
+        offset = _substring_hit(text, marker)
+        if offset >= 0:
+            report(marker, "marker-substring", offset)
+            continue
+        for candidate_text in encoded():
+            offset = _substring_hit(candidate_text, marker)
+            if offset >= 0:
+                report(marker, "marker-encoded", offset)
+                break
+
+    for needle in needles:
+        if not isinstance(needle, str) or needle == "":
+            continue
+        if len(needle) >= MIN_SCAN_CHARS:
+            offset = _substring_hit(text, needle)
+            if offset >= 0:
+                report(needle, "substring", offset)
+                continue
+            for candidate_text in encoded():
+                offset = _substring_hit(candidate_text, needle)
+                if offset >= 0:
+                    report(needle, "encoded-substring", offset)
+                    break
+            continue
+
+        # Short automatically collected needle: exact equality only, and only
+        # for free text.  A three-character machine identifier such as a token
+        # text ("eos") or an enum ("cpu") is removed structurally but would
+        # otherwise match a legitimate enum elsewhere in the archive; a caller
+        # that considers such a value sensitive must supply it as a marker.
+        if looks_structural(needle):
+            continue
+        if decoded_strings is not None:
+            if _exact_hit(decoded_strings, needle):
+                report(needle, "exact", -1)
+                continue
+        else:
+            pattern = _short_needle_pattern(needle)
+            if pattern is not None and pattern.search(text):
+                report(needle, "delimited", -1)
+                continue
+        for candidate_text in encoded():
+            candidate_strings = _json_strings(candidate_text)
+            if candidate_strings is not None and _exact_hit(candidate_strings, needle):
+                report(needle, "encoded-exact", -1)
+                break
+            if len(needle) >= MIN_SCAN_CHARS and needle in candidate_text:
+                report(needle, "encoded-substring", -1)
+                break
+
     return findings
 
 
@@ -333,7 +591,7 @@ def enforce_no_leaks(
     markers: Sequence[str] = (),
     what: str = "export",
 ) -> None:
-    findings = scan_for_leaks(text, list(needles) + list(markers))
+    findings = scan_for_leaks(text, list(needles), markers=list(markers))
     if findings:
         raise SafetyError(
             f"{what} still contains text that the privacy policy removed",
@@ -663,12 +921,14 @@ def _redact_activation_capture(
             for key in list(summary):
                 if key in _SUMMARY_MACHINE_FIELDS or key == "notes":
                     continue
-                summary[key] = removed.scrub_soft(summary[key])
+                safe_key = _scrub_mapping_key(summary, key, removed)
+                summary[safe_key] = removed.scrub_soft(summary[safe_key])
             reduced.append(summary)
         payload["summaries"] = reduced
     for key in list(payload):
         if key not in {"capture_id", "run_id", "summaries", "redacted"}:
-            payload[key] = removed.scrub_soft(payload[key])
+            safe_key = _scrub_mapping_key(payload, key, removed)
+            payload[safe_key] = removed.scrub_soft(payload[safe_key])
     payload["redacted"] = True
     return payload
 
@@ -954,6 +1214,187 @@ def _redact_investigation_evidence(
     return payload
 
 
+def _scrub_validation_text(payload: dict[str, Any], removed: RemovedText) -> None:
+    """Remove free-form validation text, which can quote prompts or errors."""
+
+    checks: list[Any] = []
+    for check in payload.get("checks") or []:
+        if not isinstance(check, dict):
+            continue
+        item = dict(check)
+        item["detail"] = removed.scrub_soft(item.get("detail"))
+        checks.append(item)
+    if checks:
+        payload["checks"] = checks
+    validity = payload.get("validity")
+    if isinstance(validity, dict):
+        validity = dict(validity)
+        validity["reasons"] = removed.scrub_string_list(validity.get("reasons"))
+        inner: list[Any] = []
+        for check in validity.get("checks") or []:
+            if not isinstance(check, dict):
+                continue
+            item = dict(check)
+            item["detail"] = removed.scrub_soft(item.get("detail"))
+            inner.append(item)
+        validity["checks"] = inner
+        payload["validity"] = validity
+
+
+def _redact_intervention_artifact(
+    payload: dict[str, Any], policy: ExportPolicy, removed: RemovedText
+) -> dict[str, Any]:
+    """``wsp.activation-intervention/1.0``: keep the structural target only.
+
+    A redacted export keeps the machine-readable scope (module, tensor role,
+    position semantics, operation, positions, shape expectations) so the
+    experiment remains interpretable, and removes every human string, inline
+    mean or donor activation, and link to artifacts that are not part of a
+    redacted package.
+    """
+
+    payload = dict(payload)
+    removed.drop(payload.get("name"))
+    payload["name"] = REDACTED
+
+    model = payload.get("model")
+    if isinstance(model, dict):
+        payload["model"] = scrub_model_ref(model, removed)
+
+    execution = payload.get("execution")
+    if isinstance(execution, dict):
+        execution = dict(execution)
+        execution["replay_artifact_id"] = None
+        execution["alignment_artifact_id"] = None
+        execution["capture_artifact_id"] = execution.get("capture_artifact_id")
+        payload["execution"] = execution
+
+    target = payload.get("target")
+    if isinstance(target, dict):
+        target = dict(target)
+        target["capture_point"] = target.get("capture_point")
+        payload["target"] = target
+
+    mean = payload.get("mean")
+    if isinstance(mean, dict):
+        mean = dict(mean)
+        # Inline values are the measurement itself; an artifact reference is
+        # dropped because retained numeric vectors never enter a redacted pack.
+        removed.drop(mean.get("values"))
+        mean["values"] = None
+        mean["artifact_id"] = None
+        provenance = mean.get("provenance")
+        if isinstance(provenance, dict):
+            provenance = dict(provenance)
+            removed.drop(provenance.get("token_alignment"))
+            provenance["token_alignment"] = REDACTED
+            provenance["source_capture_artifact_id"] = provenance.get(
+                "source_capture_artifact_id"
+            )
+            provenance["notes"] = removed.scrub_soft(provenance.get("notes"))
+            mean["provenance"] = provenance
+        payload["mean"] = mean
+
+    donor = payload.get("donor")
+    if isinstance(donor, dict):
+        donor = dict(donor)
+        removed.drop(donor.get("values"))
+        donor["values"] = None
+        donor["values_artifact_id"] = None
+        donor["note"] = removed.scrub_soft(donor.get("note"))
+        donor["capture_artifact_id"] = donor.get("capture_artifact_id")
+        payload["donor"] = donor
+
+    payload["provenance"] = removed.scrub_soft(payload.get("provenance"))
+    payload["notes"] = removed.scrub_soft(payload.get("notes"))
+    payload["metadata"] = removed.scrub_soft(payload.get("metadata"))
+    payload["checksums"] = {}
+    return payload
+
+
+def _redact_intervention_result(
+    payload: dict[str, Any], policy: ExportPolicy, removed: RemovedText
+) -> dict[str, Any]:
+    """``wsp.intervention-result/1.0``: keep aggregate numerical measurements."""
+
+    payload = dict(payload)
+    if isinstance(payload.get("model"), dict):
+        payload["model"] = scrub_model_ref(payload["model"], removed)
+    # Per-token records embed prompt token identifiers, so they are omitted from
+    # a redacted package.  Aggregate diff statistics remain.
+    payload["token_logprobs"] = []
+    _scrub_validation_text(payload, removed)
+    payload["metadata"] = removed.scrub_soft(payload.get("metadata"))
+    payload["warnings"] = removed.scrub_string_list(payload.get("warnings"))
+    payload["checksums"] = {}
+    return payload
+
+
+def _redact_counterfactual_comparison(
+    payload: dict[str, Any], policy: ExportPolicy, removed: RemovedText
+) -> dict[str, Any]:
+    """``wsp.counterfactual-comparison/1.0``: keep validity and effect statistics."""
+
+    payload = dict(payload)
+    if isinstance(payload.get("model"), dict):
+        payload["model"] = scrub_model_ref(payload["model"], removed)
+    payload["replay_artifact_id"] = None
+    conditions: list[Any] = []
+    for condition in payload.get("conditions") or []:
+        if not isinstance(condition, dict):
+            continue
+        item = dict(condition)
+        item["artifact_id"] = None
+        item["top1_token_ids"] = {}
+        conditions.append(item)
+    payload["conditions"] = conditions
+    identity = payload.get("identity_control")
+    if isinstance(identity, dict):
+        identity = dict(identity)
+        identity["detail"] = removed.scrub_soft(identity.get("detail"))
+        payload["identity_control"] = identity
+    _scrub_validation_text(payload, removed)
+    payload["metadata"] = removed.scrub_soft(payload.get("metadata"))
+    payload["warnings"] = removed.scrub_string_list(payload.get("warnings"))
+    payload["checksums"] = {}
+    return payload
+
+
+def _redact_continuation_comparison(
+    payload: dict[str, Any], policy: ExportPolicy, removed: RemovedText
+) -> dict[str, Any]:
+    """``wsp.continuation-comparison/1.0``: keep divergence structure, not text."""
+
+    payload = dict(payload)
+    if isinstance(payload.get("model"), dict):
+        payload["model"] = scrub_model_ref(payload["model"], removed)
+    payload["replay_artifact_id"] = None
+    removed.drop(payload.get("prefix_sha256"))
+    payload["prefix_sha256"] = None
+    removed.drop(payload.get("prefix_token_ids"))
+    payload["prefix_token_ids"] = []
+
+    conditions: list[Any] = []
+    for condition in payload.get("conditions") or []:
+        if not isinstance(condition, dict):
+            continue
+        item = dict(condition)
+        removed.drop(item.get("generated_token_ids"))
+        item["generated_token_ids"] = []
+        removed.drop(item.get("generated_text"))
+        item["generated_text"] = None
+        item["logprobs"] = []
+        item["intervention_events"] = []
+        item["errors"] = removed.scrub_string_list(item.get("errors"))
+        conditions.append(item)
+    payload["conditions"] = conditions
+    _scrub_validation_text(payload, removed)
+    payload["metadata"] = removed.scrub_soft(payload.get("metadata"))
+    payload["warnings"] = removed.scrub_string_list(payload.get("warnings"))
+    payload["checksums"] = {}
+    return payload
+
+
 def _redact_artifact_json_generic(
     payload: dict[str, Any], policy: ExportPolicy, removed: RemovedText
 ) -> dict[str, Any]:
@@ -1004,6 +1445,10 @@ JSON_TRANSFORMERS: dict[str, Callable[..., dict[str, Any]]] = {
     "trace_capture": _redact_trace_capture,
     "capture_comparison": _redact_capture_comparison,
     "investigation_evidence": _redact_investigation_evidence,
+    "activation_intervention": _redact_intervention_artifact,
+    "intervention_result": _redact_intervention_result,
+    "counterfactual_comparison": _redact_counterfactual_comparison,
+    "continuation_comparison": _redact_continuation_comparison,
 }
 
 
@@ -1026,6 +1471,22 @@ def _artifact_model(kind: str) -> Any:
         from wsp.investigation.evidence import InvestigationEvidence
 
         return InvestigationEvidence
+    if kind == "activation_intervention":
+        from wsp.interventions.models import ActivationIntervention
+
+        return ActivationIntervention
+    if kind == "intervention_result":
+        from wsp.interventions.models import InterventionResult
+
+        return InterventionResult
+    if kind == "counterfactual_comparison":
+        from wsp.interventions.models import CounterfactualComparison
+
+        return CounterfactualComparison
+    if kind == "continuation_comparison":
+        from wsp.interventions.models import ContinuationComparison
+
+        return ContinuationComparison
     return None
 
 
@@ -1045,7 +1506,7 @@ def _validate_artifact_payload(kind: str, payload: dict[str, Any]) -> None:
         model.model_validate(payload)
     except Exception as exc:
         raise SafetyError(
-            "a linked contrast result does not match its schema, so redaction "
+            f"a linked {kind} artifact does not match its schema, so redaction "
             "cannot be guaranteed",
             details={
                 "kind": kind,
@@ -1187,6 +1648,12 @@ def scrub_model_ref(model: Any, removed: RemovedText) -> dict[str, Any] | None:
     model["name"] = safe_display_name(model.get("name"), removed)
     removed.scrub_mapping(model.get("metadata"))
     model["metadata"] = {}
+    if "model_class" in model:
+        removed.drop(model.get("model_class"))
+        model["model_class"] = REDACTED
+    if "config_architectures" in model:
+        removed.drop(model.get("config_architectures"))
+        model["config_architectures"] = []
     return model
 
 
