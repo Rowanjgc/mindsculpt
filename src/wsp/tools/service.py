@@ -515,11 +515,13 @@ class ToolService:
         )
         from wsp.tools.alignment_handlers import register_alignment_tools
         from wsp.tools.behavior_handlers import register_behavior_tools
+        from wsp.tools.capture_handlers import register_capture_tools
         from wsp.tools.replay_handlers import register_replay_tools
 
         register_behavior_tools(self)
         register_replay_tools(self)
         register_alignment_tools(self)
+        register_capture_tools(self)
 
     # ------------------------------------------------------------------- handlers
 

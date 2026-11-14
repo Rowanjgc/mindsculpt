@@ -469,6 +469,10 @@ class BackendSpec(StrictModel):
     @model_validator(mode="after")
     def _one_config(self) -> "BackendSpec":
         required = self._CONFIG_FIELD[self.kind]
+        if self.kind == "synthetic" and self.synthetic is None:
+            # The synthetic backend has fully specified defaults; requiring an
+            # explicit empty object would be noise.
+            object.__setattr__(self, "synthetic", SyntheticBackendConfig())
         for kind, field_name in self._CONFIG_FIELD.items():
             value = getattr(self, field_name)
             if kind == required:

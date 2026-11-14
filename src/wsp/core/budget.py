@@ -58,6 +58,7 @@ class Budget(BaseModel):
     max_alignment_tokens: int = Field(default=20_000, gt=0)
     max_alignment_span_tokens: int = Field(default=4_096, gt=0)
     max_capture_positions: int = Field(default=1_024, gt=0)
+    max_capture_modules: int = Field(default=32, gt=0)
     max_capture_artifacts: int = Field(default=64, gt=0)
     max_comparison_elements: int = Field(default=20_000_000, gt=0)
     max_activation_scan_captures: int = Field(default=64, gt=0)

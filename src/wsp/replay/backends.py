@@ -22,7 +22,13 @@ from typing import Any, Protocol, Sequence
 import torch
 
 from wsp.core.dtypes import torch_dtype_name
-from wsp.core.errors import CompatibilityError, ExecutionError, SafetyError, UnsupportedError
+from wsp.core.errors import (
+    CompatibilityError,
+    ExecutionError,
+    SafetyError,
+    UnsupportedError,
+    WspError,
+)
 from wsp.core.hashing import sha256_bytes, sha256_file
 from wsp.replay.models import HYBRID_ARCHITECTURE_NOTE, ReplayModelInfo
 
@@ -380,6 +386,10 @@ class TorchReplayModel:
         try:
             with torch.inference_mode():
                 output = self.module(input_ids)
+        except WspError:
+            # Resource and input errors raised by instrumentation must stay
+            # recognisable; wrapping them would hide the real cause.
+            raise
         except Exception as exc:
             raise ExecutionError(f"replay forward failed: {exc}") from exc
         if isinstance(output, torch.Tensor):

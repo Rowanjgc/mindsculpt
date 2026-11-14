@@ -496,5 +496,73 @@ def replay(
     _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
 
 
+@app.command("capture-points")
+def capture_points(
+    ctx: typer.Context,
+    model: str = typer.Option(
+        '{"kind": "synthetic"}',
+        "--model",
+        help="Model source JSON, for example {\"kind\": \"synthetic\"} or a local_hf path.",
+    ),
+    kind: list[str] | None = typer.Option(None, "--kind", help="Restrict to an architectural role."),
+    limit: int = typer.Option(200, "--limit"),
+    input_json: str | None = typer.Option(None, "--json", help="Full ListCapturePointsInput payload."),
+) -> None:
+    """List module paths in a local model that can be targeted by a capture."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    if input_json:
+        payload = json.loads(input_json)
+    else:
+        payload = {"model": json.loads(model), "limit": limit}
+        if kind:
+            payload["kinds"] = list(kind)
+    envelope = service.call("list_capture_points", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("capture")
+def capture(
+    ctx: typer.Context,
+    trace_id: str = typer.Argument(..., help="Stored trace to replay and measure."),
+    module: list[str] = typer.Option(..., "--module", help="Module path; repeatable."),
+    position: list[int] | None = typer.Option(
+        None, "--position", help="Full-sequence token index; repeatable."
+    ),
+    span: str | None = typer.Option(None, "--span", help="Stored span resolution artifact id."),
+    mode: str = typer.Option("summary", "--mode", help="summary or selected."),
+    semantics: str = typer.Option(
+        "consuming", "--semantics", help="consuming or predicting."
+    ),
+    model: str = typer.Option('{"kind": "synthetic"}', "--model"),
+    values: bool = typer.Option(False, "--values/--no-values", help="Echo retained values."),
+    no_save: bool = typer.Option(False, "--no-save"),
+    input_json: str | None = typer.Option(
+        None, "--json", help="Full CaptureTraceActivationsInput payload."
+    ),
+) -> None:
+    """Replay a trace and measure selected internal states."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    if input_json:
+        payload = json.loads(input_json)
+    else:
+        payload = {
+            "trace_id": trace_id,
+            "model": json.loads(model),
+            "modules": list(module),
+            "mode": mode,
+            "position_semantics": semantics,
+            "include_values": values,
+            "save": not no_save,
+        }
+        if span:
+            payload["span_artifact_id"] = span
+        elif position:
+            payload["positions"] = list(position)
+        else:
+            raise typer.BadParameter("provide --position or --span")
+    envelope = service.call("capture_trace_activations", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()
