@@ -74,6 +74,13 @@ class Budget(BaseModel):
     max_continuation_tokens: int = Field(default=64, gt=0)
     max_continuation_sequence_tokens: int = Field(default=4_096, gt=0)
 
+    # Temporal plans, compositional comparisons, and staged generation
+    max_generation_steps: int = Field(default=64, gt=0)
+    max_scheduled_events: int = Field(default=64, gt=0)
+    max_temporal_interventions: int = Field(default=8, gt=0)
+    max_event_records: int = Field(default=512, gt=0)
+    max_staged_state_bytes: int = Field(default=2_000_000_000, gt=0)
+
     # Structured output
     max_output_bytes: int = Field(default=2_000_000, gt=0)
     max_artifact_bytes: int = Field(default=268_435_456, gt=0)
