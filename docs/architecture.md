@@ -33,7 +33,7 @@ in the domain modules.
 | `wsp.replay` | Replay plans, teacher-forced execution, verification, replay model adapters |
 | `wsp.alignment` | Token alignment and behavioral span resolution |
 | `wsp.investigation` | Capture points, positioned capture backends, measurement building, comparisons, evidence |
-| `wsp.interventions` | Intervention specs, slice selection/application, reversible execution hooks, paired measurement, uncached continuations |
+| `wsp.interventions` | Intervention specs, schedules, plans, slice selection/application, reversible execution hooks, paired measurement, uncached and staged continuations, compositional comparisons |
 | `wsp.tools` | Pydantic tool schemas, operation registry, shared `ToolService` |
 | `wsp.cli` | Typer commands; every command prints the service’s JSON envelope |
 | `wsp.adapters` | Optional model and format adapters: local Hugging Face, INIF 0.1, Inspect AI logs |
@@ -268,6 +268,60 @@ ids, decoding configuration, seeds, per-condition generated ids, termination
 reasons, longest common prefix, first divergence, and identity-control
 agreement. Baseline and identity must match under deterministic conditions or
 the experiment is marked invalid.
+
+### Temporal scheduling, plans, and staged execution
+
+V1.4 adds three layers on top of the V1.3 intervention core, without a second
+execution framework.
+
+`wsp.interventions.schedule` defines the time axis. A schedule is a versioned
+record (`wsp.intervention-schedule/1.0`) with three kinds
+(`first-prefix-forward`, `generation-steps`, `generation-range`), inclusive or
+half-open bounds, a bounded stride, and an event cap. `trigger` reserves the
+schema for future event triggers; only `forward` executes. The module also owns
+`TIMING_CONVENTIONS`, the single indexing table shared by replay, capture,
+intervention, and generation, and `resolve_schedule`, which partitions resolved
+steps into reached and not-reached sets at a known execution length.
+
+`wsp.interventions.plan` defines `wsp.intervention-plan/1.0`. A plan wraps full
+`ActivationIntervention` specifications, so the numerical operations stay in one
+place, and adds a schedule, a position mode (`absolute` or `last`), a per-step
+module call index, and an explicit order. Validation resolves schedules,
+estimates cost, resolves target modules against a real module tree, and rejects
+composition conflicts: same module, same step, overlapping rows or features
+unless both sides declare `allow_overlap`. Ordering is never derived from layer
+names. `identity_control_plan` derives the matching identity control, which keeps
+every hook site and schedule and changes no number.
+
+`wsp.interventions.plan_engine` is the executor. `PlanSession` groups
+interventions by `(module, tensor_role)`, installs exactly one hook per group,
+resets per-step call counters at `begin_step`, and applies same-module
+interventions sequentially in ascending order against the tensor produced by the
+previous firing. Each firing appends a bounded `InterventionEventRecord`;
+rejections are recorded and re-raised, so a rejected event cannot be mistaken for
+a successful run. After every execution the engine recomputes the parameter
+fingerprint, a mutable-state fingerprint (sampled buffers plus training flags),
+and the installed hook count, and raises if any changed. `event_log()` compares
+the fired keys with the plan's expected keys to separate *missing* events from
+*not reached* ones. `run_temporal_intervention` executes baseline, identity, and
+plan conditions in one mode and builds a `wsp.temporal-intervention/1.0` record.
+
+`wsp.interventions.composition` runs baseline, identity, A, B, and A+B through
+the same path and reports the descriptive interaction contrast on one chosen
+metric, plus pairwise logit/token differences and stepwise logit diffs. It
+refuses plans recorded in different execution modes or against different prompts.
+
+`wsp.execution.staged` separates staged execution from the uncached reference.
+A `StagedDecoder` protocol exposes `capabilities`, `prefill`, `step`, `clone`,
+`state_hash`, and `state_bytes`. `TinyStagedDecoder` drives the fixture's
+explicit key/value cache; `HFStagedDecoder` drives a local checkpoint's own
+`use_cache=True` path with an attention mask and `cache_position` spanning the
+cached prefix. `classify_hf_architecture` labels a model
+`full-attention-transformer`, `hybrid-recurrent`, or `unknown`, and the last two
+are rejected before execution. `wsp.interventions.staged` requires a
+`wsp.staged-verification/1.0` comparison against uncached execution before a
+staged intervention can be `valid`, supports `recompute` and verified `clone`
+isolation, and records prefill/decode timing and state size.
 
 ### Workspace layout
 

@@ -250,8 +250,8 @@ silently.
   optional nnterp backend remains capture-only in V1.3; intervention requests
   against it are rejected, never silently rerouted.
 - One intervention site per specification. `apply_on_calls` selects which calls
-  receive it, but the workbench does not compose multi-site interventions or
-  coordinated cross-layer sweeps.
+  receive it. Multi-site experiments are expressed as a V1.4 intervention plan;
+  a single specification is still one site.
 - The engine rebuilds one nesting level of structured module output (tensor,
   tuple, list, mapping). Deeper structures must be addressed by an explicit
   `tensor_name`/`tensor_index` path that the code supports, or are rejected.
@@ -259,8 +259,9 @@ silently.
   caches. Paired teacher-forced measurements and uncached continuations report
   their execution mode; the workbench never claims that cached generation and
   full-prefix execution behave identically.
-- Continuations are greedy, uncached, and full-prefix. Sampling, KV-cache
-  manipulation, beam search, and stateful generation are not supported.
+- Continuations are greedy and full-prefix. Sampling, beam search, and
+  production decoding are not supported. Cached decoding exists only through the
+  opt-in, verified staged path described below.
 - A measured downstream difference is an effect under the stated conditions. It
   is not proof that the intervened component explains a behavior, and the
   workbench never emits automatic causal labels, circuit discoveries, or
@@ -296,3 +297,67 @@ silently.
   architecture and on one real Qwen3.5 hybrid checkpoint; other families are
   untested and may be refused.
 - V1.3 interventions do not run through nnterp, cached generation, or sampling.
+
+## Temporal interventions and plans
+
+- Scheduling is step-based. Event-triggered scheduling (for example "the first
+  occurrence of a token-level event") is reserved in the schema but not
+  executable in this release; only `trigger: "forward"` is accepted.
+- Schedules are declarative records with bounded step counts, strides, and
+  ranges. Arbitrary executable predicates are never accepted, so a schedule that
+  cannot be expressed as steps or a range cannot be scheduled.
+- Uncached full-prefix decoding recomputes earlier positions on every step. A
+  one-time intervention is therefore not carried forward; a sustained schedule is
+  an explicit repeat. The workbench does not simulate persistence.
+- `absolute` position mode is limited to rows before the prompt length, because
+  later rows do not exist at step 0. `last` mode addresses the newest row.
+  Staged plans accept `absolute` only at step 0.
+- Ordering inside one module is by explicit `order`. Overlapping interventions
+  are rejected unless both sides declare `allow_overlap`; the workbench never
+  merges conflicting regions or resolves a conflict by inference.
+- Ordering across modules follows actual module invocation. The workbench never
+  assumes that layer numbering equals execution order, but it also does not model
+  architectures whose control flow differs from the observed call sequence
+  without executing them.
+- The engine rebuilds one nesting level of structured module output. Deeper
+  structures are rejected rather than guessed.
+- An expected scheduled event that does not fire marks the run `invalid`. A
+  scheduled event whose step was never reached is reported as pending and does
+  not by itself invalidate the run.
+- Resource bounds apply to generation steps, scheduled events, interventions,
+  event records, targeted modules, selected elements, donor size, observed logit
+  rows, and continuation length. Uncached execution is quadratic in steps; the
+  plan reports a cost estimate before running.
+- Mutable-state protection samples buffers and training flags and compares them
+  before and after execution. It is not a proof that every architecture-specific
+  mutable field is covered. Architectures that mutate state the engine cannot
+  reasonably restore should not be used for repeated paired experiments through
+  this path.
+- Compositional comparisons measure non-additivity on one chosen scale. They do
+  not establish a circuit, necessity, sufficiency, or uniqueness.
+
+## Staged and cached generation
+
+- Staged support is limited to architectures classified as
+  `full-attention-transformer` and verified against uncached execution for the
+  specific prompt, model, dtype, and device. Everything else is rejected with
+  `unsupported`.
+- Hybrid architectures such as Qwen3.5 (Gated DeltaNet) carry recurrent state
+  beyond a key/value cache. Staged decoding is explicitly rejected for them in
+  this release; only uncached scheduled interventions are available. The
+  Qwen3.5-0.8B checkpoint was not present in the validation environment, so no
+  staged claim is made for it either way beyond rejection.
+- The Hugging Face staged decoder uses the model's own forward path with an
+  explicit all-ones mask and `cache_position` over the cached prefix. It does not
+  support architectures that require a bespoke generation loop, and it does not
+  implement attention kernels.
+- Verification compares tokens, per-step logits, greedy choices, termination,
+  and identity control at declared tolerances (default `atol = rtol = 1e-5`).
+  Bitwise equality is reported separately as `exact` and is not assumed.
+- `clone` isolation is verified by re-hashing the source state after a branch.
+  A shallow copy is detected and rejected. `recompute` remains the default
+  because it cannot share state at all.
+- Performance figures are engineering measurements on the recorded machine.
+  They are not promises about other hardware and never take precedence over
+  correctness.
+- Only greedy decoding is supported in staged mode.

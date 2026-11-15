@@ -279,6 +279,22 @@ produced by the current exporter.
   only checked against `max_artifact_bytes` at write time; very large
   investigations should be split or exported without embedded traces.
 
+### Temporal intervention evidence
+
+A V1.4 evidence bundle can also carry `plans`, `event_logs`, `temporal_runs`,
+`compositions`, and `staged_continuations` alongside the V1.3 intervention and
+continuation references. Each reference stores identifiers and summary fields
+(validity, identity agreement, fired/missing counts, verification agreement),
+not the whole record, and every referenced artifact is included in the bundle.
+
+Redacted export follows those reference lists exactly as it follows captures and
+comparisons: plan notes and prompts are scrubbed, generated token sequences and
+top-1 tokens are cleared, staged state and cache metadata are omitted, and
+checksums are dropped because the payload changed. Execution mode, validity
+status, verification agreement, isolation mode, and the limitation lists survive
+the round trip, so a reloaded bundle still states which backend produced each
+measurement and what it does not license.
+
 ## What a case is not
 
 - It is not a diagnosis.

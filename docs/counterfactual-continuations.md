@@ -154,3 +154,20 @@ promise portability of the numbers.
 Continuations are behavioural evidence under controlled conditions. Causal
 interpretation requires replication, additional controls, and evaluation outside
 this milestone.
+
+## Where V1.4 continues
+
+This document describes the V1.3 continuation mode: greedy, uncached,
+full-prefix, with the intervention applied only during the first prefix forward.
+That mode is unchanged and remains the reference implementation.
+
+V1.4 generalizes the same decoding path to arbitrary generation steps (see
+[`docs/temporal-interventions.md`](temporal-interventions.md)), adds multi-site
+plans and composition ([`docs/intervention-plans.md`](intervention-plans.md)),
+and adds *optional* verified cached decoding
+([`docs/staged-generation.md`](staged-generation.md)). Staged results are only
+reported as such after an unmodified staged run agrees with this uncached
+reference on tokens, per-step logits, termination, and identity control.
+
+A claim that a modified activation "persists" across steps is still false in
+uncached decoding. A sustained schedule is an explicit repeat, not persistence.

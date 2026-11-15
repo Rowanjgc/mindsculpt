@@ -4,12 +4,12 @@ An open-source, model-agnostic **Weight-Space Programming Workbench**: bounded
 instruments for observing, inspecting, measuring, patching, executing, and
 reproducing work on neural-network weights and behavior.
 
-V1.3 is deliberately **tools first**. It is not an autonomous agent, a training
+V1.4 is deliberately **tools first**. It is not an autonomous agent, a training
 loop, a benchmark platform, or an interpreter for neurons. It provides reliable
 primitives that a person or a future tool-using agent can compose, with the same
 operations exposed through Python, a CLI, and JSON tool schemas.
 
-> **Status:** V1.3 complete. CPU-only, offline tests and examples. No LLM, cloud
+> **Status:** V1.4 complete. CPU-only, offline tests and examples. No LLM, cloud
 > service, API key, or network access is required.
 
 ## What V1 includes
@@ -114,6 +114,44 @@ claim a discovery.
   attach to existing failure cases and evidence bundles, survive export/reload,
   and are transformed or omitted by the same privacy system as every other
   artifact.
+
+## What V1.4 adds: temporal and compositional interventions
+
+V1.3 can only intervene during the first prefix forward. V1.4 makes *when* an
+intervention fires a first-class, reproducible part of the experiment, and lets
+several interventions run in one plan.
+
+- **Temporal schedules** — a versioned `wsp.intervention-schedule/1.0` record
+  selecting the first prefix forward, explicit generation steps, a bounded
+  inclusive or half-open step range, or a bounded repeated stride. Schedules are
+  declarative data; arbitrary executable predicates are rejected.
+- **Explicit timing conventions** — prompt index, generation step, generated
+  token index, full-sequence index, forward invocation, activation consumption
+  position, and next-token prediction position are defined once in
+  `wsp.interventions.schedule.TIMING_CONVENTIONS` and used consistently by
+  replay, capture, intervention, and generation. Generation step `k` is the
+  forward that consumes the prefix plus `k` generated tokens and predicts
+  generated token `k`.
+- **Intervention plans** — `wsp.intervention-plan/1.0` composes several
+  interventions, each with its own schedule, site, tensor selection, operation,
+  order, and position mode. Deterministic ordering and collision detection are
+  part of validation: overlapping same-module regions at overlapping steps are
+  rejected unless both specifications explicitly declare `allow_overlap`.
+- **Individual versus combined comparisons** — `wsp.compositional-comparison/1.0`
+  measures baseline, identity, A, B, and A+B conditions with identical weights,
+  inputs, and precision, and reports a descriptive interaction contrast
+  `I_AB = (Y_AB - Y_0) - (Y_A - Y_0) - (Y_B - Y_0)` on an explicitly chosen
+  scalar. Discrete outcomes such as generated length are marked non-continuous.
+- **Verified staged generation** — an optional cached path built on the model's
+  own generation interfaces. A staged run is only usable after stepwise logits,
+  token choices, termination, and identity control agree with the uncached
+  reference within declared tolerances. Hybrid/recurrent architectures are
+  rejected explicitly; Qwen3.5-style hybrid state is not claimed.
+- **Event logs and evidence** — `wsp.intervention-event-log/1.0`,
+  `wsp.temporal-intervention/1.0`, `wsp.staged-verification/1.0`, and
+  `wsp.staged-continuation/1.0` record which event fired, where, with what
+  before/after summary, and integrate with failure cases, export, and the
+  existing privacy policy.
 
 ## Install
 
@@ -331,6 +369,12 @@ result = service.call("inspect_model", {"path": "examples/out/tiny_mlp.safetenso
   and limitations.
 - [`docs/counterfactual-continuations.md`](docs/counterfactual-continuations.md) —
   uncached greedy continuations, position semantics, divergence, and limits.
+- [`docs/temporal-interventions.md`](docs/temporal-interventions.md) — generation
+  steps, token positions, schedules, event logs, and uncached semantics.
+- [`docs/intervention-plans.md`](docs/intervention-plans.md) — multi-site plans,
+  ordering, collisions, identity controls, and compositional comparisons.
+- [`docs/staged-generation.md`](docs/staged-generation.md) — staged/cached
+  execution, equivalence verification, isolation, and supported architectures.
 - [`docs/patch-format.md`](docs/patch-format.md) — the versioned patch format,
   operations, compatibility checks, casting, export, and rollback.
 - [`docs/limitations.md`](docs/limitations.md) — supported formats,

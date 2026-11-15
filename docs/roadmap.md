@@ -179,6 +179,74 @@ implemented merely because they sound useful.
 - Offline end-to-end demonstration, tiny-transformer integration tests, short/
   Unicode privacy tests, and optional real-checkpoint intervention tests.
 
+## Completed in V1.4
+
+### Temporal scheduling
+
+- A versioned schedule record (`wsp.intervention-schedule/1.0`) with
+  first-prefix-forward, explicit generation steps, and inclusive or half-open
+  ranges with a bounded stride. Executable predicates are never accepted;
+  `trigger` reserves the schema for future event triggers.
+- One documented indexing convention shared by replay, capture, intervention,
+  and generation: generation step `k` consumes the prefix plus `k` generated
+  tokens and predicts generated token `k`, so `k = 0` is the first-prefix
+  forward. Plans persist the convention with the record.
+- Two position modes: `absolute` rows before the prompt length, and `last` for
+  the newest row of the current forward. `position_semantics` stays descriptive
+  and never shifts indices.
+- Explicit handling of uncached recomputation: a one-time intervention is not
+  persistent, a sustained schedule is an explicit repeat, and every firing is
+  logged so the difference is visible rather than inferred.
+
+### Intervention plans and composition
+
+- `wsp.intervention-plan/1.0`: a portable plan of one to thirty-two scheduled
+  interventions, each wrapping a full V1.3 specification, plus position mode,
+  per-step module call index, explicit order, limits, provenance, and timing
+  conventions.
+- Deterministic ordering: distinct modules fire in actual model invocation
+  order, same-module interventions fire in ascending explicit order, and
+  conflicts (same module, overlapping step and region) are rejected unless both
+  sides declare `allow_overlap`.
+- Identity plans derived from a plan keep every hook site and schedule and change
+  no number. Validation resolves modules against a real module tree and estimates
+  forward calls and token positions before execution.
+- `wsp.intervention-event-log/1.0` and `wsp.temporal-intervention/1.0`, with
+  applied, identity, rejected, missing, and not-reached events, bounded slice
+  statistics, replacement digests, and parameter/mutable-state/hook verification.
+- `wsp.compositional-comparison/1.0`: baseline, identity, A, B, and A+B measured
+  in one execution mode, with pairwise differences and a descriptive interaction
+  contrast. Discrete metrics are labelled as such and never treated as
+  continuous.
+
+### Verified staged generation
+
+- A staged decoder abstraction (prefill, step, clone, state hash/size) over the
+  fixture's explicit key/value cache and over a local checkpoint's own cached
+  forward path.
+- `wsp.staged-verification/1.0`: an unmodified staged run must agree with the
+  uncached reference on tokens, per-step logits, greedy choices, termination, and
+  identity control before a staged intervention can be `valid`.
+- Architecture classification with explicit rejection of hybrid-recurrent and
+  unknown architectures. Qwen3.5-style Gated DeltaNet models are rejected rather
+  than approximated.
+- Verified `clone` isolation and default `recompute` isolation, plus prefill,
+  decode, total, reference, and state-size measurements.
+- `wsp.staged-continuation/1.0` records, including the verification block and the
+  performance measurements.
+
+### Evidence, privacy, and interfaces
+
+- Six new artifact kinds integrated into `wsp.investigation-evidence/1.0`, case
+  references, export/import, and the existing redaction policy, with fail-closed
+  handling of malformed or untransformable payloads.
+- Ten structured operations and matching CLI commands sharing the existing
+  service layer.
+- Offline 24-step demonstration, unit tests for schedules/plans/execution/
+  composition/staged/privacy/tools, tiny-transformer integration tests, and
+  optional real-checkpoint tests covering scheduled uncached interventions,
+  multi-site plans, and staged support reporting.
+
 ## Deliberately deferred
 
 These are **not** in V1.3:
@@ -202,7 +270,11 @@ These are **not** in V1.3:
 - Automatic span selection or automatic mechanism naming.
 - nnterp-backed interventions, cached/stateful generation, and sampling
   continuations.
-- Multi-site or coordinated cross-layer intervention sweeps.
+- Event-triggered (token-event) intervention scheduling.
+- Verified staged generation for hybrid/recurrent architectures such as Qwen3.5.
+- Sampling, beam search, or production decoding in either continuation mode.
+- Automatic interaction interpretation beyond a descriptive non-additivity
+  measurement.
 
 ## Possible future work (hypotheses, not commitments)
 

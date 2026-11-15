@@ -238,3 +238,23 @@ still bounded by `max_replay_logits_elements`.
 * that a downstream change is an improvement.
 
 Those require additional controls, replication, and behavioural evaluation.
+
+## Where V1.4 continues
+
+V1.3 interventions fire inside one forward pass selected by module call index.
+V1.4 keeps every V1.3 record readable and every V1.3 tool working, and adds a
+time axis and a composition layer on top:
+
+* [`docs/temporal-interventions.md`](temporal-interventions.md) — generation-step
+  scheduling, position modes, event logs, and why an uncached one-time
+  intervention does not persist.
+* [`docs/intervention-plans.md`](intervention-plans.md) — multi-site plans,
+  deterministic ordering, conflict rejection, identity plans, and
+  individual-versus-combined comparisons.
+* [`docs/staged-generation.md`](staged-generation.md) — verified cached
+  execution, cache isolation, and the architectures that are rejected.
+
+A V1.3 artifact is never reinterpreted: `apply_on_calls` still means a module
+call index, and `execution.intervention_event = "first-prefix-forward"` still
+means step 0. New experiments should use a plan, which records its schedule
+explicitly.

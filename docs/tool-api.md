@@ -281,6 +281,74 @@ incompatible models, shapes, dtypes, capture points, sequence lengths, budgets,
 or an unreadable replacement raise a typed error rather than falling back to a
 different operation.
 
+## Temporal intervention operations
+
+| Operation | Purpose |
+| --- | --- |
+| `create_intervention_plan` | Build, validate, and store a `wsp.intervention-plan/1.0` |
+| `validate_intervention_plan` | Re-check a plan, optionally against a real model tree |
+| `preview_intervention_plan` | Resolve every scheduled firing without changing anything |
+| `run_temporal_intervention` | Baseline, identity, and scheduled-plan conditions |
+| `inspect_intervention_events` | Applied, missing, not-reached, and rejected events |
+| `run_compositional_comparison` | Baseline/identity/A/B/A+B with interaction contrasts |
+| `prepare_staged_generation` | Report staged support and build a generation state |
+| `verify_staged_generation` | Compare an unmodified staged run with uncached execution |
+| `run_staged_intervention` | Run a plan through a verified staged decoder |
+| `attach_temporal_evidence` | Attach temporal records to a failure case |
+
+```bash
+wsp create-intervention-plan --json '{
+  "name": "loop onset",
+  "prompt_token_ids": [1, 10, 11, 12],
+  "execution_mode": "uncached-generation",
+  "max_new_tokens": 5,
+  "interventions": [
+    {"intervention_artifact_id": "a_1111...", "order": 0,
+     "schedule": {"kind": "generation-steps", "steps": [2]},
+     "position_mode": "last"}
+  ]
+}'
+wsp validate-intervention-plan pl_2222... --source '{"kind":"synthetic"}'
+wsp preview-intervention-plan --plan pl_2222... --source '{"kind":"synthetic"}'
+wsp run-temporal-intervention --plan pl_2222... --source '{"kind":"synthetic"}'
+wsp inspect-intervention-events --run <temporal-run-artifact-id>
+wsp run-compositional-comparison --plan-a pl_3... --plan-b pl_4... --plan-ab pl_5... \
+    --source '{"kind":"synthetic"}' --metric mean_generated_logprob
+wsp prepare-staged-generation --source '{"kind":"synthetic"}' --tokens 1,10,11,12
+wsp verify-staged-generation --plan pl_6... --source '{"kind":"synthetic"}' --isolation clone
+wsp run-staged-intervention --plan pl_6... --source '{"kind":"synthetic"}' --isolation clone
+wsp attach-temporal-evidence --title "temporal experiment" --case case_1a2b... \
+    --plan pl_2222... --event-log el_7777... --run tr2_8888...
+```
+
+A scheduled intervention entry takes either an inline `intervention` record or an
+`intervention_artifact_id`, plus `label`, `order`, `schedule`, `position_mode`
+(`absolute` or `last`), `on_step_call_indices`, and `allow_overlap`. A schedule
+accepts `{"kind": "generation-steps", "steps": [...]}`, a range record, an
+integer, or a list of integers; executable predicates are rejected.
+
+`run_temporal_intervention` takes `plan` or `plan_artifact_id`, an execution
+`source`, `token_ids` or a `trace_id`, `identity` (default true), and an optional
+`case_id`. It returns the run record plus `event_log_artifact_ids` keyed
+`baseline`/`identity`/`plan` and `event_summaries` with the same keys.
+
+`run_compositional_comparison` takes `plan_a`, `plan_b`, and `plan_ab` (inline or
+as artifact ids), an optional `negative_control_artifact_id`, a `metric`, and
+`identity`/`isolation` flags. It refuses plans recorded in different execution
+modes or for different prompt lengths.
+
+`inspect_intervention_events` takes exactly one of `event_log_artifact_id` or
+`run_artifact_id`, `include_events`, and a bounded `max_entries`.
+
+`prepare_staged_generation`, `verify_staged_generation`, and
+`run_staged_intervention` report architecture class and, for hybrid-recurrent or
+unknown architectures, fail with `unsupported` rather than approximating.
+Verification defaults to `atol = rtol = 1e-5` and `isolation = "recompute"`.
+
+Every operation records its execution mode. Staged results are never reported as
+uncached results, and a staged run whose verification is not `exact` or
+`within_tolerance` cannot be `valid`.
+
 ## Privacy in exports
 
 `export_trace` and `export_failure_case` take an explicit policy:

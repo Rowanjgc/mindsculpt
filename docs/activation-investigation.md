@@ -281,3 +281,17 @@ round-trips byte-for-byte. See `docs/failure-cases.md` for the policy itself.
 V1.3 adds the controlled-intervention layer on top of these captures. See
 `docs/causal-interventions.md` for intervention semantics and
 `docs/counterfactual-continuations.md` for bounded generation-time comparisons.
+
+## Where V1.4 continues
+
+Captures remain the way to *observe* internal state. V1.4 adds the ability to
+*intervene* at a chosen generation step, at several sites in one forward, and
+repeatedly over a bounded range:
+
+* [`docs/temporal-interventions.md`](temporal-interventions.md)
+* [`docs/intervention-plans.md`](intervention-plans.md)
+* [`docs/staged-generation.md`](staged-generation.md)
+
+Capture artifacts, alignment artifacts, and trace ids are still referenced by
+intervention execution identities, so temporal evidence remains linked to the
+observation it came from.
