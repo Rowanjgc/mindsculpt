@@ -222,3 +222,15 @@ wsp attach-temporal-evidence --title "two-site experiment" --case case_1a2b... \
 An empty plan is rejected by the schema: `interventions` has a minimum length of
 one. A plan with an `identity` operation is a valid control that still installs
 hooks. The two must never be confused, and neither can substitute for the other.
+
+## V1.5 event triggers and plans
+
+The V1.4 plan engine remains the executor for precomputed schedules. V1.5 event
+triggers are a declarative layer that decides *when* an intervention becomes
+eligible, then applies the same `ActivationIntervention` operations. An online
+trigger cannot be represented as a fixed plan before generation because its
+step depends on observed tokens; the trigger record preserves that distinction.
+
+Retrospective investigations use fixed-context replay rather than a fabricated
+plan schedule. Combined plans, scheduling, and fixed-context comparisons all
+share the same operation implementations and model-state protections.

@@ -433,3 +433,62 @@ Hugging Face adapter refuses remote downloads by default and sets
   is native and versioned.
 - Do not add abstraction layers without an immediate use.
 - Do not infer concepts from measurements; report measurements only.
+
+## V1.5: event-driven investigation
+
+V1.5 adds four layers without changing the existing execution engine.
+
+```
+trace ──> behavioral event ──> event trigger ──> generation or replay
+                                │
+                                ├── online:  intervene after observation
+                                └── retrospective: fixed-context replay
+                                                        │
+                                                        v
+                                          fixed-context comparison
+                                          baseline / identity / intervention
+                                                        │
+                                                        v
+                                        dossier + case evidence + export
+```
+
+### New modules
+
+- `wsp.behavior.events` — `wsp.behavioral-event/1.0`, deterministic token and
+  n-gram detection, text-boundary ambiguity, detector-finding resolution, manual
+  events, and content checksums.
+- `wsp.interventions.event_trigger` — `wsp.event-trigger/1.0`,
+  `wsp.event-intervention/1.0`, online scheduling, trigger validation, and
+  retrospective trigger records.
+- `wsp.interventions.fixed_context` — `wsp.fixed-context-replay/1.0` and
+  `wsp.fixed-context-comparison/1.0`. Prefix reconstruction uses V1.2 replay;
+  measurement uses the V1.3 paired-intervention engine.
+- `wsp.recipes` — declarative recipe registry and a small bounded runner that
+  calls existing structured operations.
+- `wsp.investigation.dossier` — `wsp.investigation-dossier/1.0`.
+- `wsp.tools.discovery` — deterministic metadata and progressive disclosure.
+
+### Reuse boundaries
+
+The event trigger executor does not implement a second activation-patching path.
+It calls the same `ActivationIntervention` operations, reversible hooks,
+selection resolution, and model-state verification as the V1.4 plan engine.
+Fixed-context comparisons call the V1.3 paired-measurement function; V1.5 adds
+prefix selection, shared-token validation, event linkage, and the comparison
+record.
+
+Recipes call the structured service rather than internal functions. Their
+validation, budgets, artifact storage, privacy metadata, and error envelopes are
+therefore the same as a direct tool call.
+
+### Execution guarantees
+
+- Online triggers evaluate only observed tokens; the earliest eligible forward
+  is strictly after observation.
+- Every fixed-context condition consumes the same token identifiers and records
+  the same sequence digest.
+- Identity control is mandatory by default and a failure invalidates the
+  comparison.
+- Model parameters, mutable buffers, training flags, and hook residue are checked
+  around execution.
+- A recipe failure records the failing step and never reports completion.

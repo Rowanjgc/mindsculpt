@@ -4,12 +4,12 @@ An open-source, model-agnostic **Weight-Space Programming Workbench**: bounded
 instruments for observing, inspecting, measuring, patching, executing, and
 reproducing work on neural-network weights and behavior.
 
-V1.4 is deliberately **tools first**. It is not an autonomous agent, a training
+V1.5 is deliberately **tools first**. It is not an autonomous agent, a training
 loop, a benchmark platform, or an interpreter for neurons. It provides reliable
 primitives that a person or a future tool-using agent can compose, with the same
 operations exposed through Python, a CLI, and JSON tool schemas.
 
-> **Status:** V1.4 complete. CPU-only, offline tests and examples. No LLM, cloud
+> **Status:** V1.5 complete. CPU-only, offline tests and examples. No LLM, cloud
 > service, API key, or network access is required.
 
 ## What V1 includes
@@ -152,6 +152,49 @@ several interventions run in one plan.
   `wsp.staged-continuation/1.0` record which event fired, where, with what
   before/after summary, and integrate with failure cases, export, and the
   existing privacy policy.
+
+## What V1.5 adds: event-driven investigation
+
+V1.4 could schedule an intervention at a known generation step. V1.5 connects
+that machinery to observed behavior and makes the path from observation to a
+controlled internal experiment explicit.
+
+- **Deterministic behavioral events** — `wsp.behavioral-event/1.0` records token
+  occurrences, repeated sequences, the earliest repetition, detector findings,
+  manual marks, and text matches. Events state absolute token positions,
+  generation steps, alignment status, prompt offsets, and provenance. A
+  repetition is a measurement, not a diagnosis.
+- **Online event triggers** — `wsp.event-trigger/1.0` declares a delay, firing
+  mode, bounded step window, maximum trigger count, and position mode. An event
+  observed after generated token `k` cannot fire before step `k + 1 + delay`.
+  Events with no subsequent forward are reported as `not_reached`; the system
+  never claims a firing that did not happen.
+- **Retrospective triggers** — an existing event may be investigated at an
+  explicitly selected replay step, including a step before the event. Every such
+  record is labelled retrospective and is distinguished from an online trigger.
+- **Fixed-context counterfactuals** — `wsp.fixed-context-replay/1.0` reconstructs
+  the exact recorded prefix; `wsp.fixed-context-comparison/1.0` runs baseline,
+  mandatory identity control, and one activation intervention on identical token
+  identifiers. Measurements include selected log-probabilities, logits, and
+  optional downstream activations. Optional continuations are kept separate and
+  their divergence is reported.
+- **Investigation recipes** — three versioned, previewable recipes compose the
+  existing operations: investigate a finding, test an activation hypothesis, or
+  investigate a repetition event. A failed recipe preserves completed artifacts
+  and records the failing step; it is never reported as completed.
+- **Agent-oriented discovery and dossiers** — operations now carry grouping,
+  prerequisites, backends, artifact kinds, cost class, side effects, privacy
+  notes, limitations, follow-ups, and examples. `discover_capabilities` provides
+  deterministic progressive disclosure. `wsp.investigation-dossier/1.0`
+  separates observations, measurements, controls, hypotheses, limitations, and
+  next operations.
+- **Evidence and privacy** — events, replays, comparisons, recipe runs, and
+  dossiers are content-addressed artifacts, attach to failure cases, and are
+  transformed or omitted by the existing single exporter. New artifact kinds
+  are registered explicitly; unregistered kinds fail closed.
+
+The repetition in the offline example is a constructed fixture. V1.5 makes no
+claim about discovering a reasoning-loop mechanism.
 
 ## Install
 
@@ -371,6 +414,15 @@ result = service.call("inspect_model", {"path": "examples/out/tiny_mlp.safetenso
   uncached greedy continuations, position semantics, divergence, and limits.
 - [`docs/temporal-interventions.md`](docs/temporal-interventions.md) — generation
   steps, token positions, schedules, event logs, and uncached semantics.
+- [`docs/event-driven-investigations.md`](docs/event-driven-investigations.md) —
+  behavioral events, online/retrospective triggers, timing, and budgets.
+- [`docs/fixed-context-counterfactuals.md`](docs/fixed-context-counterfactuals.md) —
+  exact prefix reconstruction, baseline/identity/intervention controls, and
+  fixed-context measurement.
+- [`docs/investigation-recipes.md`](docs/investigation-recipes.md) — the three
+  built-in recipes, previews, failure records, and limits.
+- [`docs/agent-tool-usage.md`](docs/agent-tool-usage.md) — discovery, recipe
+  choice, missing prerequisites, failed controls, and context budgeting.
 - [`docs/intervention-plans.md`](docs/intervention-plans.md) — multi-site plans,
   ordering, collisions, identity controls, and compositional comparisons.
 - [`docs/staged-generation.md`](docs/staged-generation.md) — staged/cached

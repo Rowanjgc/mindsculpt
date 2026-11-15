@@ -341,3 +341,58 @@ assets are bundled here.
 - No feature should make source checkpoint mutation possible.
 - No agent-only behavior. Python, CLI, and future tool transports must call the
   same service.
+
+## Completed in V1.5
+
+### Deterministic events
+
+- `wsp.behavioral-event/1.0` with token occurrence, repeated sequence, first
+  repetition, detector finding, manual, and text-pattern events.
+- Absolute token positions, prompt offsets, generation steps, consumed
+  positions, earliest online steps, alignment status, and content checksums.
+- Text-boundary ambiguity reported instead of fabricated activation positions.
+
+### Triggered interventions
+
+- `wsp.event-trigger/1.0` with online and retrospective modes, delay, bounded
+  window, firing mode, maximum count, and position mode.
+- Strict causal ordering: an event observed after token `k` cannot fire before
+  step `k + 1 + delay`.
+- Separate observed, scheduled, fired, not-reached, skipped, and rejected states.
+- `wsp.event-intervention/1.0` records the event life cycle, applications,
+  conditions, identity control, stepwise logits, and validity.
+
+### Fixed-context counterfactuals
+
+- `wsp.fixed-context-replay/1.0` and `wsp.fixed-context-comparison/1.0`.
+- Exact prefix reconstruction, shared token digest, mandatory identity control,
+  selected log-probabilities and logits, optional downstream measurements.
+- Optional bounded continuation kept separate, with divergence reporting.
+
+### Accessibility
+
+- `wsp.investigation-recipe/1.0` and `wsp.recipe-run/1.0`.
+- Three built-in recipes with preview, prerequisites, cost estimates, artifacts,
+  privacy notes, and structured partial-failure records.
+- `wsp.investigation-dossier/1.0` separating observations, measurements,
+  controls, hypotheses, limitations, and next operations.
+- Discovery metadata for every operation, nine groups, and deterministic
+  progressive disclosure through `discover_capabilities`.
+
+### Evidence and safety
+
+- New artifact kinds registered with the single privacy exporter.
+- Event, comparison, recipe-run, and dossier references added to evidence and
+  failure cases.
+- New budgets for event lookback, trigger counts, fixed-context positions,
+  recipe steps, passes, and artifacts.
+
+## Candidate next work
+
+- Evaluate the high-level recipes with actual general-purpose language models.
+- Add a controlled comparison of recipe use versus low-level tool composition.
+- Explore explicitly labelled semantic event detectors, without making a model
+  judge mandatory.
+- Extend fixed-context measurement to selected attention/MLP subspaces.
+- Consider verified cached execution for fixed-context comparisons once a
+  backend guarantees identical hidden state.

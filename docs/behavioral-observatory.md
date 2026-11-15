@@ -337,3 +337,21 @@ V1.2 does not include autonomous agents, automatic weight-patch discovery,
 gradient training, automatic causal explanations, benchmark leaderboards, a GUI,
 distributed inference, GGUF editing, or a large defect taxonomy. Generation-time
 activation capture is referenced by the schema but not implemented.
+
+## V1.5 behavioral events
+
+Detector findings remain measurements. V1.5 adds a separate
+`wsp.behavioral-event/1.0` record that resolves a finding, token pattern, text
+match, or manual mark to an exact absolute token position and generation step.
+
+Key differences from a finding:
+
+- A finding reports a detector's unit (token or word range).
+- An event reports the absolute sequence position, the prompt offset used, the
+  consuming forward, and the earliest online intervention step.
+- An event that cannot be aligned exactly records `ambiguous` or `unavailable`;
+  it is never given a fabricated activation position.
+
+Event detection is available through `detect_behavioral_events`, and
+`resolve_event_position` re-reports the timing without re-running detection.
+See [`event-driven-investigations.md`](event-driven-investigations.md).

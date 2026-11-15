@@ -258,3 +258,19 @@ A V1.3 artifact is never reinterpreted: `apply_on_calls` still means a module
 call index, and `execution.intervention_event = "first-prefix-forward"` still
 means step 0. New experiments should use a plan, which records its schedule
 explicitly.
+
+## V1.5 event-triggered and fixed-context interventions
+
+V1.5 adds two ways to reach the existing intervention operations.
+
+- **Online event trigger** — the trigger observes generated tokens and applies
+  the intervention at the earliest eligible subsequent forward. It uses the same
+  reversible hook session, selection resolution, and model-state checks as V1.4.
+- **Fixed-context comparison** — baseline, identity, and intervention consume one
+  identical recorded sequence. The identity control remains mandatory; a failure
+  invalidates attribution.
+
+Neither path adds a new patching mechanism. A triggered or fixed-context effect
+is still a numerical observation under recorded conditions, not a mechanism or a
+repair. See [`event-driven-investigations.md`](event-driven-investigations.md)
+and [`fixed-context-counterfactuals.md`](fixed-context-counterfactuals.md).

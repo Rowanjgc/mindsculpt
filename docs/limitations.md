@@ -361,3 +361,29 @@ silently.
   They are not promises about other hardware and never take precedence over
   correctness.
 - Only greedy decoding is supported in staged mode.
+
+## V1.5 limits and non-claims
+
+- Behavioral events are deterministic measurements, not diagnoses. Repetition
+  is not automatically pathological.
+- An online trigger cannot use tokens that have not been generated. An event
+  observed at the final step has no eligible subsequent forward and is reported
+  as `not_reached`.
+- Retrospective triggers are explicitly offline reconstructions; they do not
+  establish what an online trigger would have done.
+- Fixed-context comparisons establish a numerical effect under the recorded
+  model, dtype, backend, token sequence, positions, and operation. They do not
+  establish semantic meaning, a complete mechanism, a repair, or an equivalent
+  permanent weight edit.
+- A failed identity control invalidates attribution. A missing identity control
+  limits interpretation.
+- Optional continuations diverge; later states are conditioned on different
+  generated histories.
+- Text-pattern events report token-boundary ambiguity rather than inventing a
+  position.
+- Recipes are bounded compositions of existing operations, not an autonomous
+  research agent or a general workflow engine.
+- No LLM provider, cloud service, automatic checkpoint download, or automatic
+  circuit interpretation is included.
+- Tool accessibility has not yet been evaluated with general-purpose language
+  models.

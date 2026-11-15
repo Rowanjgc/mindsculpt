@@ -258,3 +258,19 @@ interventions are a separate layer built on these artifacts; see
 `docs/causal-interventions.md`. Controlled continuations use an explicit
 uncached, full-prefix mode and never claim cached-generation compatibility; see
 `docs/counterfactual-continuations.md`.
+
+## V1.5 fixed-context replay
+
+`prepare_fixed_context_replay` wraps the V1.2 replay plan. It requires exact
+recorded input and generated token identifiers, builds the full sequence, checks
+the sequence digest and length budget, and records the selected replay step and
+consumed position. It does not reconstruct exact prefixes from decoded text
+unless the trace recorded the necessary tokenizer information.
+
+`run_fixed_context_comparison` reuses the V1.3 paired-intervention engine over
+that exact sequence. Baseline, identity, and intervention all consume the same
+token identifiers. The selected intervention must target the consumed position
+of the selected replay step.
+
+Alignment status matters: an event marked `ambiguous` or `unavailable` cannot be
+used for fixed-context targeting.

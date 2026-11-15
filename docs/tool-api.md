@@ -682,3 +682,69 @@ falls back to a different algorithm.
 
 The tool service never downloads models, never loads pickle checkpoints, never
 executes code from a checkpoint, and never writes to a source checkpoint.
+
+## V1.5 operations
+
+The registry now exposes 80 operations. Discovery metadata is returned by
+`describe()` and by the `tools` CLI command for every operation: group, purpose,
+prerequisites, backends, artifact kinds, cost class, side effects, privacy
+notes, limitations, follow-ups, and examples.
+
+| Operation | Purpose | Workspace |
+| --- | --- | --- |
+| `discover_capabilities` | Deterministic progressive disclosure of operations and recipes. | No |
+| `detect_behavioral_events` | Resolve a token pattern, finding, text match, or manual mark to an event. | Yes |
+| `resolve_event_position` | Report an event's absolute position and online timing. | Yes |
+| `create_event_trigger` | Create a validated online or retrospective trigger. | Yes |
+| `list_event_triggers` | List stored triggers. | Yes |
+| `prepare_fixed_context_replay` | Reconstruct an exact recorded token prefix. | Yes |
+| `run_fixed_context_comparison` | Baseline, identity, and intervention on one fixed context. | Yes |
+| `run_event_triggered_intervention` | Online trigger execution or retrospective fixed-context investigation. | Yes |
+| `create_investigation_dossier` | Build a concise, structured dossier. | Yes |
+| `inspect_investigation_dossier` | Read a dossier with bounded measurements. | Yes |
+| `attach_event_evidence` | Attach events, comparisons, recipe runs, and dossiers to a case. | Yes |
+| `list_investigation_recipes` | List recipes and their steps. | No |
+| `preview_investigation_recipe` | Inspect inputs, costs, prerequisites, and privacy before running. | No |
+| `run_investigation_recipe` | Run a bounded multi-step recipe. | Yes |
+| `inspect_recipe_run` | Read a recipe run with step statuses. | Yes |
+
+### Discovery request
+
+```json
+{"query": "repetition", "group": null, "detail": "compact", "include_recipes": true, "max_operations": 12}
+```
+
+The response includes `groups`, matching `operations`, relevant `recipes`,
+`next_operations`, and a note that the result is metadata filtering rather than
+an autonomous plan.
+
+### Event request
+
+```json
+{
+  "trace_id": "tr_...",
+  "event_definition": {"kind": "first_repetition", "ngram_size": 2, "min_occurrences": 2},
+  "max_events": 8,
+  "save": true
+}
+```
+
+### Fixed-context request
+
+```json
+{
+  "replay_artifact_id": "a_...",
+  "intervention_artifact_id": "a_...",
+  "source": {"kind": "synthetic"},
+  "logit_positions": [4, 5],
+  "identity": true
+}
+```
+
+### New artifact kinds
+
+`behavioral_event`, `event_trigger`, `event_intervention`,
+`fixed_context_replay`, `fixed_context_comparison`, `investigation_dossier`,
+`recipe_run`. Each is registered with the privacy exporter; redacted exports
+transform or omit token payloads and fail closed for unsupported sensitive
+artifacts.

@@ -208,3 +208,22 @@ the requested intervention.
 - Behaviour beyond `max_new_tokens` is not observed.
 - Results are specific to the recorded model, dtype, device, backend, and token
   sequence.
+
+## V1.5 event triggers
+
+The V1.4 schedule `trigger` field was reserved for future event triggers. V1.5
+implements them as a separate versioned record rather than inventing a new
+executor:
+
+- `wsp.event-trigger/1.0` declares the event condition, delay, firing mode,
+  bounded window, maximum count, and position mode.
+- Online execution observes tokens and schedules the intervention at
+  `generation_step_observed + 1 + delay`.
+- Retrospective execution selects an explicit replay step and is labelled as
+  such.
+- Observed events that never reach an eligible forward are recorded as
+  `not_reached`; no firing is claimed.
+
+The online executor reuses the same intervention operations and event-record
+style as the plan engine. See
+[`event-driven-investigations.md`](event-driven-investigations.md).

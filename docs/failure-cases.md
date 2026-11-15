@@ -302,3 +302,21 @@ measurement and what it does not license.
 - It is not proof that a weight patch caused an improvement.
 - It is not a substitute for a controlled experiment.
 - It does not become true because a detector produced a finding.
+
+## V1.5 event evidence
+
+`InvestigationLink` now also records:
+
+- `event_ids`
+- `fixed_context_ids`
+- `recipe_run_ids`
+- `dossier_ids`
+
+`wsp.investigation-evidence/1.0` accepts corresponding typed references:
+`EventRef`, `FixedContextRef`, `RecipeRunRef`, and `DossierRef`. They are
+identifier-and-measurement links; detailed token data stays in the referenced
+artifacts and is transformed by the same privacy policy.
+
+A case can therefore reference its traces, findings, events, replays,
+fixed-context comparisons, recipe runs, dossiers, captures, plans, and existing
+weight patches with cross-reference validation and content addressing.
