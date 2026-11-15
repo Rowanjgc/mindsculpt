@@ -186,15 +186,107 @@ class CausalSelfAttention(nn.Module):
         self.qkv = nn.Linear(model_dim, model_dim * 3)
         self.out = nn.Linear(model_dim, model_dim)
 
-    def forward(self, hidden: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        hidden: torch.Tensor,
+        cache: "TinyKVCache | None" = None,
+        layer_index: int = 0,
+    ) -> torch.Tensor:
         batch, length, dim = hidden.shape
         qkv = self.qkv(hidden).reshape(batch, length, 3, self.num_heads, self.head_dim)
         query, key, value = qkv.permute(2, 0, 3, 1, 4)
-        attended = torch.nn.functional.scaled_dot_product_attention(
-            query, key, value, is_causal=True
-        )
+        if cache is None:
+            attended = torch.nn.functional.scaled_dot_product_attention(
+                query, key, value, is_causal=True
+            )
+        else:
+            past = cache.get(layer_index)
+            if past is not None:
+                if length != 1:
+                    raise InputError(
+                        "a cached forward must process exactly one new position per call",
+                        details={"length": int(length)},
+                    )
+                past_key, past_value = past
+                key = torch.cat([past_key, key], dim=2)
+                value = torch.cat([past_value, value], dim=2)
+            attended = torch.nn.functional.scaled_dot_product_attention(
+                query, key, value, is_causal=past is None
+            )
+            # The cache is an explicit object owned by the caller.  The model
+            # never stores it on the module, so replay and hooks see the same
+            # module tree either way.
+            cache.set(layer_index, key, value)
         merged = attended.transpose(1, 2).reshape(batch, length, dim)
         return self.out(merged)
+
+
+@dataclass
+class TinyKVCache:
+    """Per-layer key/value state for the fixture's cached decoder.
+
+    Ownership is explicit: the object is passed into ``forward`` and mutated
+    there.  Two branches must therefore either rebuild their own state or call
+    :meth:`clone`, which copies every tensor.  A shallow copy would let one
+    branch corrupt the other, which is exactly the failure the staged
+    verification is designed to catch.
+    """
+
+    keys: list[torch.Tensor | None]
+    values: list[torch.Tensor | None]
+    token_ids: list[int]
+
+    @classmethod
+    def empty(cls, num_layers: int) -> "TinyKVCache":
+        return cls(
+            keys=[None for _ in range(num_layers)],
+            values=[None for _ in range(num_layers)],
+            token_ids=[],
+        )
+
+    def get(self, layer_index: int) -> tuple[torch.Tensor, torch.Tensor] | None:
+        key = self.keys[layer_index]
+        value = self.values[layer_index]
+        if key is None or value is None:
+            return None
+        return key, value
+
+    def set(self, layer_index: int, key: torch.Tensor, value: torch.Tensor) -> None:
+        self.keys[layer_index] = key
+        self.values[layer_index] = value
+
+    @property
+    def length(self) -> int:
+        return len(self.token_ids)
+
+    def clone(self) -> "TinyKVCache":
+        return TinyKVCache(
+            keys=[None if item is None else item.clone() for item in self.keys],
+            values=[None if item is None else item.clone() for item in self.values],
+            token_ids=list(self.token_ids),
+        )
+
+    def state_hash(self) -> str:
+        import hashlib
+
+        digest = hashlib.sha256()
+        digest.update(str(self.token_ids).encode("utf-8"))
+        for index, (key, value) in enumerate(zip(self.keys, self.values)):
+            for tensor in (key, value):
+                if tensor is None:
+                    digest.update(f"|{index}:none".encode("utf-8"))
+                    continue
+                contiguous = tensor.detach().to("cpu", torch.float32).contiguous()
+                digest.update(f"|{index}:{tuple(int(d) for d in contiguous.shape)}".encode("utf-8"))
+                digest.update(contiguous.numpy().tobytes())
+        return "sha256:" + digest.hexdigest()
+
+    def state_bytes(self) -> int:
+        total = 0
+        for tensor in self.keys + self.values:
+            if tensor is not None:
+                total += int(tensor.numel()) * int(tensor.element_size())
+        return total
 
 
 class TinyBlock(nn.Module):
@@ -209,8 +301,13 @@ class TinyBlock(nn.Module):
             nn.Linear(model_dim * 2, model_dim),
         )
 
-    def forward(self, hidden: torch.Tensor) -> torch.Tensor:
-        hidden = hidden + self.attn(self.ln1(hidden))
+    def forward(
+        self,
+        hidden: torch.Tensor,
+        cache: TinyKVCache | None = None,
+        layer_index: int = 0,
+    ) -> torch.Tensor:
+        hidden = hidden + self.attn(self.ln1(hidden), cache=cache, layer_index=layer_index)
         return hidden + self.mlp(self.ln2(hidden))
 
 
@@ -253,25 +350,60 @@ class TinyCausalLM(nn.Module):
                 )
         self.eval()
 
-    def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        cache: TinyKVCache | None = None,
+        position_offset: int = 0,
+    ) -> torch.Tensor:
+        """Map identifiers to logits.
+
+        ``cache`` is optional and always caller-owned.  Without it the model is
+        the ordinary full-prefix decoder the rest of the workbench replays.  With
+        it, the call must carry exactly one new position, which is appended to
+        the cache; the returned logits describe only that position.  No state is
+        stored on the module, so parameter and buffer fingerprints are unaffected
+        and every module still receives a normal forward call.
+        """
+
         length = int(input_ids.shape[1])
-        if length > self.max_seq_len:
+        total_length = length + (cache.length if cache is not None else 0)
+        if total_length > self.max_seq_len:
             raise ValueError(
-                f"sequence length {length} exceeds the fixture maximum {self.max_seq_len}"
+                f"sequence length {total_length} exceeds the fixture maximum {self.max_seq_len}"
             )
-        positions = torch.arange(length, device=input_ids.device).unsqueeze(0)
+        positions = (
+            torch.arange(length, device=input_ids.device) + int(position_offset)
+        ).unsqueeze(0)
         hidden = self.embed(input_ids.long()) + self.pos(positions)
-        for block in self.blocks:
-            hidden = block(hidden)
+        for index, block in enumerate(self.blocks):
+            hidden = block(hidden, cache=cache, layer_index=index)
         logits = self.head(self.norm(hidden))
-        if self.repeat_bias:
-            previous = torch.roll(input_ids, shifts=1, dims=1)
-            previous[:, 0] = input_ids[:, 0]
+        if cache is not None:
+            full_ids = torch.tensor(
+                [list(cache.token_ids) + [int(item) for item in input_ids[0].tolist()]],
+                dtype=torch.long,
+                device=input_ids.device,
+            )
+            cache.token_ids.extend(int(item) for item in input_ids[0].tolist())
+        else:
+            full_ids = input_ids
+            if self.repeat_bias:
+                previous = torch.roll(input_ids, shifts=1, dims=1)
+                previous[:, 0] = input_ids[:, 0]
+                logits = logits.scatter_add(
+                    2, previous.unsqueeze(-1), torch.full_like(logits, self.repeat_bias)
+                )
+        if self.repeat_bias and cache is not None:
+            previous = torch.roll(full_ids, shifts=1, dims=1)[:, -length:]
+            if length == int(full_ids.shape[1]):
+                # Prefill: position 0 has no predecessor, matching the uncached path.
+                previous[:, 0] = full_ids[:, 0]
             logits = logits.scatter_add(
                 2, previous.unsqueeze(-1), torch.full_like(logits, self.repeat_bias)
             )
         if self.stop_bonus and self.stop_token_id is not None:
-            stopped = (input_ids == int(self.stop_token_id)).any(dim=1, keepdim=True)
+            stopped = (full_ids == int(self.stop_token_id)).any(dim=1, keepdim=True)
             if bool(stopped.any()):
                 boost = torch.zeros_like(logits).scatter(
                     2,
@@ -385,6 +517,7 @@ __all__ = [
     "SyntheticRuntime",
     "TinyBlock",
     "TinyCausalLM",
+    "TinyKVCache",
     "build_runtime",
     "greedy_generate",
     "teacher_forced_logits",
