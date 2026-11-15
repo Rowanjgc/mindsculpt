@@ -1205,6 +1205,49 @@ def _redact_investigation_evidence(
         plans.append(item)
     payload["plans"] = plans
 
+    events: list[Any] = []
+    for event in payload.get("events") or []:
+        if not isinstance(event, dict):
+            continue
+        item = dict(event)
+        item["note"] = removed.scrub_soft(item.get("note"))
+        item["alignment_status"] = removed.scrub_soft(item.get("alignment_status"))
+        events.append(item)
+    payload["events"] = events
+
+    fixed: list[Any] = []
+    for comparison in payload.get("fixed_context_comparisons") or []:
+        if not isinstance(comparison, dict):
+            continue
+        item = dict(comparison)
+        item["note"] = removed.scrub_soft(item.get("note"))
+        item["validity_status"] = removed.scrub_soft(item.get("validity_status"))
+        item["identity_agreement"] = removed.scrub_soft(item.get("identity_agreement"))
+        fixed.append(item)
+    payload["fixed_context_comparisons"] = fixed
+
+    recipe_runs: list[Any] = []
+    for run in payload.get("recipe_runs") or []:
+        if not isinstance(run, dict):
+            continue
+        item = dict(run)
+        item["recipe_id"] = removed.scrub_soft(item.get("recipe_id"))
+        item["status"] = removed.scrub_soft(item.get("status"))
+        item["note"] = removed.scrub_soft(item.get("note"))
+        recipe_runs.append(item)
+    payload["recipe_runs"] = recipe_runs
+
+    dossiers: list[Any] = []
+    for dossier in payload.get("dossiers") or []:
+        if not isinstance(dossier, dict):
+            continue
+        item = dict(dossier)
+        removed.drop(item.get("title"))
+        item["title"] = REDACTED
+        item["note"] = removed.scrub_soft(item.get("note"))
+        dossiers.append(item)
+    payload["dossiers"] = dossiers
+
     privacy = payload.get("privacy")
     if isinstance(privacy, dict):
         privacy = dict(privacy)
@@ -1643,6 +1686,273 @@ def is_dropped_kind(kind: str) -> bool:
 
     return kind in DERIVED_NUMERIC_KINDS
 
+def _redact_behavioral_event(
+    payload: dict[str, Any], policy: ExportPolicy, removed: RemovedText
+) -> dict[str, Any]:
+    """``wsp.behavioral-event/1.0``: keep the measured token position only."""
+
+    payload = dict(payload)
+    removed.drop(payload.get("token_ids"))
+    payload["token_ids"] = []
+    trigger = payload.get("trigger")
+    if isinstance(trigger, dict):
+        trigger = dict(trigger)
+        removed.drop(trigger.get("text_pattern"))
+        trigger["text_pattern"] = None
+        trigger["parameters"] = removed.scrub_soft(trigger.get("parameters"))
+        payload["trigger"] = trigger
+    payload["provenance"] = removed.scrub_soft(payload.get("provenance"))
+    payload["metadata"] = removed.scrub_soft(payload.get("metadata"))
+    payload["limitations"] = removed.scrub_string_list(payload.get("limitations"))
+    payload["checksums"] = {}
+    return payload
+
+
+def _redact_event_trigger(
+    payload: dict[str, Any], policy: ExportPolicy, removed: RemovedText
+) -> dict[str, Any]:
+    """``wsp.event-trigger/1.0``: keep mode, timing, and bounds."""
+
+    payload = dict(payload)
+    removed.drop(payload.get("name"))
+    payload["name"] = None
+    removed.drop(payload.get("event_id"))
+    payload["event_id"] = None
+    removed.drop(payload.get("notes"))
+    payload["notes"] = None
+    definition = payload.get("definition")
+    if isinstance(definition, dict):
+        definition = dict(definition)
+        removed.drop(definition.get("text_pattern"))
+        definition["text_pattern"] = None
+        definition["parameters"] = removed.scrub_soft(definition.get("parameters"))
+        payload["definition"] = definition
+    payload["metadata"] = removed.scrub_soft(payload.get("metadata"))
+    return payload
+
+
+def _redact_event_intervention(
+    payload: dict[str, Any], policy: ExportPolicy, removed: RemovedText
+) -> dict[str, Any]:
+    """``wsp.event-intervention/1.0``: keep timing, controls, and validity."""
+
+    payload = dict(payload)
+    if isinstance(payload.get("model"), dict):
+        payload["model"] = scrub_model_ref(payload["model"], removed)
+    removed.drop(payload.get("prompt_token_ids_sha256"))
+    payload["prompt_token_ids_sha256"] = None
+    trigger = payload.get("trigger")
+    if isinstance(trigger, dict):
+        payload["trigger"] = _redact_event_trigger(trigger, policy, removed)
+    conditions = []
+    for item in payload.get("conditions") or []:
+        if not isinstance(item, dict):
+            continue
+        entry = dict(item)
+        removed.drop(entry.get("generated_token_ids"))
+        entry["generated_token_ids"] = []
+        entry["logprobs"] = []
+        entry["top1_token_ids"] = []
+        entry["errors"] = removed.scrub_string_list(entry.get("errors"))
+        conditions.append(entry)
+    payload["conditions"] = conditions
+    events = []
+    for item in payload.get("events") or []:
+        if not isinstance(item, dict):
+            continue
+        entry = dict(item)
+        event = entry.get("event")
+        if isinstance(event, dict):
+            entry["event"] = _redact_behavioral_event(event, policy, removed)
+        entry["rejection_reason"] = removed.scrub_soft(entry.get("rejection_reason"))
+        entry["notes"] = removed.scrub_string_list(entry.get("notes"))
+        events.append(entry)
+    payload["events"] = events
+    identity = payload.get("identity_control")
+    if isinstance(identity, dict):
+        identity = dict(identity)
+        identity["detail"] = removed.scrub_soft(identity.get("detail"))
+        payload["identity_control"] = identity
+    stepwise = []
+    for item in payload.get("stepwise") or []:
+        if not isinstance(item, dict):
+            continue
+        entry = dict(item)
+        removed.drop(entry.get("left_token_id"))
+        removed.drop(entry.get("right_token_id"))
+        entry["left_token_id"] = None
+        entry["right_token_id"] = None
+        stepwise.append(entry)
+    payload["stepwise"] = stepwise
+    _scrub_validation_text(payload, removed)
+    payload["warnings"] = removed.scrub_string_list(payload.get("warnings"))
+    payload["metadata"] = removed.scrub_soft(payload.get("metadata"))
+    payload["checksums"] = {}
+    return payload
+
+
+def _redact_fixed_replay(
+    payload: dict[str, Any], policy: ExportPolicy, removed: RemovedText
+) -> dict[str, Any]:
+    """``wsp.fixed-context-replay/1.0``: keep positions and checks, drop tokens."""
+
+    payload = dict(payload)
+    if isinstance(payload.get("model"), dict):
+        payload["model"] = scrub_model_ref(payload["model"], removed)
+    if isinstance(payload.get("tokenizer"), dict):
+        payload["tokenizer"] = scrub_tokenizer_ref(payload["tokenizer"], removed)
+    sequence = payload.get("sequence")
+    if isinstance(sequence, dict):
+        sequence = dict(sequence)
+        removed.drop(sequence.get("input_token_ids"))
+        removed.drop(sequence.get("generated_token_ids"))
+        removed.drop(sequence.get("full_token_ids"))
+        sequence["input_token_ids"] = []
+        sequence["generated_token_ids"] = []
+        sequence["full_token_ids"] = []
+        sequence["prompt_length"] = 0
+        sequence["generated_length"] = 0
+        sequence["full_length"] = 0
+        removed.drop(sequence.get("sequence_sha256"))
+        sequence["sequence_sha256"] = None
+        sequence["warnings"] = removed.scrub_string_list(sequence.get("warnings"))
+        payload["sequence"] = sequence
+    removed.drop(payload.get("replay_step"))
+    removed.drop(payload.get("consumed_position"))
+    payload["replay_step"] = None
+    payload["consumed_position"] = None
+    payload["warnings"] = removed.scrub_string_list(payload.get("warnings"))
+    payload["provenance"] = removed.scrub_soft(payload.get("provenance"))
+    payload["metadata"] = removed.scrub_soft(payload.get("metadata"))
+    payload["checksums"] = {}
+    return payload
+
+
+def _redact_fixed_comparison(
+    payload: dict[str, Any], policy: ExportPolicy, removed: RemovedText
+) -> dict[str, Any]:
+    """``wsp.fixed-context-comparison/1.0``: keep numerical effects and controls."""
+
+    payload = dict(payload)
+    removed.drop(payload.get("token_ids_sha256"))
+    payload["token_ids_sha256"] = ""
+    if isinstance(payload.get("model"), dict):
+        payload["model"] = scrub_model_ref(payload["model"], removed)
+    measurements = []
+    for item in payload.get("measurements") or []:
+        if not isinstance(item, dict):
+            continue
+        entry = dict(item)
+        removed.drop(entry.get("token_id"))
+        entry["token_id"] = None
+        removed.drop(entry.get("baseline_top1_token_id"))
+        removed.drop(entry.get("intervention_top1_token_id"))
+        entry["baseline_top1_token_id"] = None
+        entry["intervention_top1_token_id"] = None
+        measurements.append(entry)
+    payload["measurements"] = measurements
+    continuation = payload.get("continuation")
+    if isinstance(continuation, dict):
+        continuation = dict(continuation)
+        removed.drop(continuation.get("baseline_token_ids"))
+        removed.drop(continuation.get("intervention_token_ids"))
+        continuation["baseline_token_ids"] = []
+        continuation["intervention_token_ids"] = []
+        continuation["config"] = removed.scrub_soft(continuation.get("config"))
+        payload["continuation"] = continuation
+    identity = payload.get("identity_control")
+    if isinstance(identity, dict):
+        identity = dict(identity)
+        identity["detail"] = removed.scrub_soft(identity.get("detail"))
+        payload["identity_control"] = identity
+    _scrub_validation_text(payload, removed)
+    payload["warnings"] = removed.scrub_string_list(payload.get("warnings"))
+    payload["limitations"] = removed.scrub_string_list(payload.get("limitations"))
+    payload["provenance"] = removed.scrub_soft(payload.get("provenance"))
+    payload["metadata"] = removed.scrub_soft(payload.get("metadata"))
+    payload["checksums"] = {}
+    return payload
+
+
+def _redact_dossier(
+    payload: dict[str, Any], policy: ExportPolicy, removed: RemovedText
+) -> dict[str, Any]:
+    """``wsp.investigation-dossier/1.0``: keep structure, drop narrative text."""
+
+    payload = dict(payload)
+    removed.drop(payload.get("title"))
+    payload["title"] = REDACTED
+    removed.drop(payload.get("summary"))
+    payload["summary"] = None
+    observations = []
+    for item in payload.get("observations") or []:
+        if not isinstance(item, dict):
+            continue
+        entry = dict(item)
+        entry["summary"] = removed.scrub_soft(entry.get("summary"))
+        observations.append(entry)
+    payload["observations"] = observations
+    measurements = []
+    for item in payload.get("measurements") or []:
+        if not isinstance(item, dict):
+            continue
+        entry = dict(item)
+        removed.drop(entry.get("token_id"))
+        entry["token_id"] = None
+        measurements.append(entry)
+    payload["measurements"] = measurements
+    controls = []
+    for item in payload.get("controls") or []:
+        if not isinstance(item, dict):
+            continue
+        entry = dict(item)
+        entry["detail"] = removed.scrub_soft(entry.get("detail"))
+        controls.append(entry)
+    payload["controls"] = controls
+    hypotheses = []
+    for item in payload.get("hypotheses") or []:
+        if not isinstance(item, dict):
+            continue
+        entry = dict(item)
+        removed.drop(entry.get("statement"))
+        removed.drop(entry.get("rationale"))
+        entry["statement"] = REDACTED
+        entry["rationale"] = None
+        entry["proposed_by"] = None
+        hypotheses.append(entry)
+    payload["hypotheses"] = hypotheses
+    payload["limitations"] = removed.scrub_string_list(payload.get("limitations"))
+    payload["provenance"] = removed.scrub_soft(payload.get("provenance"))
+    payload["metadata"] = removed.scrub_soft(payload.get("metadata"))
+    payload["checksums"] = {}
+    return payload
+
+
+def _redact_recipe_run(
+    payload: dict[str, Any], policy: ExportPolicy, removed: RemovedText
+) -> dict[str, Any]:
+    """``wsp.recipe-run/1.0``: keep step status and artifact references."""
+
+    payload = dict(payload)
+    removed.drop(payload.get("inputs_sha256"))
+    payload["inputs_sha256"] = None
+    steps = []
+    for item in payload.get("steps") or []:
+        if not isinstance(item, dict):
+            continue
+        entry = dict(item)
+        entry["detail"] = removed.scrub_soft(entry.get("detail"))
+        entry["error"] = removed.scrub_soft(entry.get("error"))
+        steps.append(entry)
+    payload["steps"] = steps
+    payload["validity"] = removed.scrub_soft(payload.get("validity"))
+    payload["warnings"] = removed.scrub_string_list(payload.get("warnings"))
+    payload["limitations"] = removed.scrub_string_list(payload.get("limitations"))
+    payload["provenance"] = removed.scrub_soft(payload.get("provenance"))
+    payload["checksums"] = {}
+    return payload
+
+
 JSON_TRANSFORMERS: dict[str, Callable[..., dict[str, Any]]] = {
     "contrast_result": _redact_contrast_result,
     "activation_capture": _redact_activation_capture,
@@ -1659,6 +1969,13 @@ JSON_TRANSFORMERS: dict[str, Callable[..., dict[str, Any]]] = {
     "compositional_comparison": _redact_composition,
     "staged_verification": _redact_staged_verification,
     "staged_continuation": _redact_staged_continuation,
+    "behavioral_event": _redact_behavioral_event,
+    "event_trigger": _redact_event_trigger,
+    "event_intervention": _redact_event_intervention,
+    "fixed_context_replay": _redact_fixed_replay,
+    "fixed_context_comparison": _redact_fixed_comparison,
+    "investigation_dossier": _redact_dossier,
+    "recipe_run": _redact_recipe_run,
 }
 
 
@@ -1721,6 +2038,34 @@ def _artifact_model(kind: str) -> Any:
         from wsp.interventions.plan_models import StagedContinuation
 
         return StagedContinuation
+    if kind == "behavioral_event":
+        from wsp.behavior.events import BehavioralEvent
+
+        return BehavioralEvent
+    if kind == "event_trigger":
+        from wsp.interventions.event_trigger import EventTrigger
+
+        return EventTrigger
+    if kind == "event_intervention":
+        from wsp.interventions.event_trigger import EventInterventionRun
+
+        return EventInterventionRun
+    if kind == "fixed_context_replay":
+        from wsp.interventions.fixed_context import FixedContextReplay
+
+        return FixedContextReplay
+    if kind == "fixed_context_comparison":
+        from wsp.interventions.fixed_context import FixedContextComparison
+
+        return FixedContextComparison
+    if kind == "investigation_dossier":
+        from wsp.investigation.dossier import InvestigationDossier
+
+        return InvestigationDossier
+    if kind == "recipe_run":
+        from wsp.recipes.models import RecipeRun
+
+        return RecipeRun
     return None
 
 

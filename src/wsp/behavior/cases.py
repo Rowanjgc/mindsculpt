@@ -440,6 +440,10 @@ def _investigation_artifact_ids(
             "temporal_runs",
             "compositions",
             "staged_continuations",
+            "events",
+            "fixed_context_comparisons",
+            "recipe_runs",
+            "dossiers",
         ):
             for reference in evidence.get(key) or []:
                 if not isinstance(reference, dict):
@@ -464,6 +468,13 @@ def _investigation_artifact_ids(
             vector_id = measurement.get("value_artifact_id")
             if isinstance(vector_id, str) and vector_id.startswith("a_"):
                 found.add(vector_id)
+        # A dossier references its comparison and supporting artifacts by id.
+        for reference in record.get("artifact_refs") or []:
+            if not isinstance(reference, dict):
+                continue
+            nested = reference.get("artifact_id")
+            if isinstance(nested, str) and nested.startswith("a_"):
+                found.add(nested)
     return found
 
 

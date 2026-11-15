@@ -287,3 +287,67 @@ def test_cli_intervention_workflow(tmp_path: Path) -> None:
     payload = _json(paired.stdout)["data"]
     assert payload["identity_control"]["agreement"] == "exact"
     assert payload["validity"]["status"] == "valid"
+
+
+def test_cli_discover_and_recipes_are_json() -> None:
+    runner = CliRunner()
+    discover = runner.invoke(
+        app, ["discover", "--query", "repetition", "--detail", "compact"]
+    )
+    assert discover.exit_code == 0, discover.stdout
+    payload = _json(discover.stdout)
+    assert payload["data"]["schema_version"] == "wsp.capabilities/1.0"
+    assert payload["data"]["recipes"]
+
+    recipes = runner.invoke(app, ["recipes"])
+    assert recipes.exit_code == 0, recipes.stdout
+    listed = _json(recipes.stdout)
+    assert listed["data"]["count"] >= 3
+    ids = {item["recipe_id"] for item in listed["data"]["recipes"]}
+    assert "investigate_repetition_event" in ids
+
+
+def test_cli_detect_events_and_preview_recipe(tmp_path: Path) -> None:
+    runner = CliRunner()
+    root = tmp_path / "cli-events"
+    runner.invoke(app, ["--workspace", str(root), "init"], catch_exceptions=False)
+    recorded = runner.invoke(
+        app,
+        [
+            "--workspace",
+            str(root),
+            "record-trace",
+            "--json",
+            '{"input_text":"loop","backend":{"kind":"synthetic"},"params":{"max_new_tokens":8}}',
+        ],
+    )
+    assert recorded.exit_code == 0, recorded.stdout
+    trace_id = _json(recorded.stdout)["data"]["trace_id"]
+    detected = runner.invoke(
+        app,
+        [
+            "--workspace",
+            str(root),
+            "detect-events",
+            "--trace",
+            trace_id,
+            "--json",
+            '{"event_definition":{"kind":"first_repetition","ngram_size":2,"min_occurrences":2}}',
+        ],
+    )
+    assert detected.exit_code == 0, detected.stdout
+    assert _json(detected.stdout)["data"]["event_id"]
+
+    preview = runner.invoke(
+        app,
+        [
+            "--workspace",
+            str(root),
+            "preview-recipe",
+            "test_activation_hypothesis",
+            "--inputs",
+            '{"trace_id":"tr_missing"}',
+        ],
+    )
+    assert preview.exit_code == 0, preview.stdout
+    assert _json(preview.stdout)["data"]["recipe"]["recipe_id"] == "test_activation_hypothesis"

@@ -101,6 +101,19 @@ class ToolDefinition:
     handler: Handler
     output_description: str
     requires_workspace: bool = False
+    #: Capability metadata used by ``discover_capabilities``.  Defaults are
+    #: derived from the operation name when a tool does not declare them.
+    group: str | None = None
+    purpose: str | None = None
+    prerequisites: tuple[str, ...] = ()
+    backends: tuple[str, ...] = ()
+    artifact_kinds: tuple[str, ...] = ()
+    cost_class: str = "low"
+    side_effects: tuple[str, ...] = ()
+    privacy: tuple[str, ...] = ()
+    limitations: tuple[str, ...] = ()
+    followups: tuple[str, ...] = ()
+    examples: tuple[dict[str, Any], ...] = ()
 
 
 def _compact_patch(patch: WeightPatch) -> dict[str, Any]:
@@ -186,26 +199,59 @@ class ToolService:
     def operations(self) -> list[str]:
         return sorted(self._definitions)
 
-    def describe(self, operation: str | None = None) -> dict[str, Any]:
-        names = [operation] if operation else self.operations()
+    def describe(
+        self,
+        operation: str | None = None,
+        *,
+        group: str | None = None,
+        detail: str = "full",
+    ) -> dict[str, Any]:
+        from wsp.tools.discovery import metadata_for
+
+        if operation:
+            names = [operation]
+        else:
+            names = self.operations()
         entries = []
+        groups: dict[str, int] = {}
         for name in names:
             definition = self._definitions.get(name)
             if definition is None:
                 raise NotFoundError(f"unknown tool operation {name!r}", details={"available": self.operations()})
-            entries.append(
-                {
-                    "name": definition.name,
-                    "description": definition.description,
-                    "input_schema": definition.input_model.model_json_schema(),
-                    "output_schema": {
-                        "type": "object",
-                        "description": definition.output_description,
-                    },
-                    "requires_workspace": definition.requires_workspace,
+            metadata = metadata_for(definition)
+            groups[metadata["group"]] = groups.get(metadata["group"], 0) + 1
+            if group and metadata["group"] != group:
+                continue
+            entry: dict[str, Any] = {
+                "name": definition.name,
+                "description": definition.description,
+                "group": metadata["group"],
+                "purpose": metadata["purpose"],
+                "prerequisites": metadata["prerequisites"],
+                "backends": metadata["backends"],
+                "artifact_kinds": metadata["artifact_kinds"],
+                "cost_class": metadata["cost_class"],
+                "side_effects": metadata["side_effects"],
+                "privacy": metadata["privacy"],
+                "limitations": metadata["limitations"],
+                "followups": metadata["followups"],
+                "examples": metadata["examples"],
+                "requires_workspace": definition.requires_workspace,
+            }
+            if detail != "compact":
+                entry["input_schema"] = definition.input_model.model_json_schema()
+                entry["output_schema"] = {
+                    "type": "object",
+                    "description": definition.output_description,
                 }
-            )
-        return {"schema_version": "wsp.tool-registry/1.0", "operations": entries}
+            entries.append(entry)
+        return {
+            "schema_version": "wsp.tool-registry/1.0",
+            "detail": detail,
+            "group": group,
+            "groups": dict(sorted(groups.items())),
+            "operations": entries,
+        }
 
     # --------------------------------------------------------------------- call
 
@@ -516,8 +562,10 @@ class ToolService:
         from wsp.tools.alignment_handlers import register_alignment_tools
         from wsp.tools.behavior_handlers import register_behavior_tools
         from wsp.tools.capture_handlers import register_capture_tools
+        from wsp.tools.event_handlers import register_event_tools
         from wsp.tools.intervention_handlers import register_intervention_tools
         from wsp.tools.investigation_handlers import register_investigation_tools
+        from wsp.tools.recipe_handlers import register_recipe_tools
         from wsp.tools.replay_handlers import register_replay_tools
         from wsp.tools.temporal_handlers import register_temporal_tools
 
@@ -528,6 +576,8 @@ class ToolService:
         register_investigation_tools(self)
         register_intervention_tools(self)
         register_temporal_tools(self)
+        register_event_tools(self)
+        register_recipe_tools(self)
 
     # ------------------------------------------------------------------- handlers
 

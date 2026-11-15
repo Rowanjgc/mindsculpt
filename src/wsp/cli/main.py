@@ -1437,5 +1437,282 @@ def attach_temporal_evidence(
     _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
 
 
+@app.command("discover")
+def discover(
+    ctx: typer.Context,
+    query: str | None = typer.Option(None, "--query", "-q"),
+    group: str | None = typer.Option(None, "--group"),
+    detail: str = typer.Option("compact", "--detail"),
+    include_recipes: bool = typer.Option(True, "--recipes/--no-recipes"),
+    max_operations: int = typer.Option(12, "--max-operations"),
+) -> None:
+    """Discover relevant operations and recipes without dumping the whole registry."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    envelope = service.call(
+        "discover_capabilities",
+        {
+            "query": query,
+            "group": group,
+            "detail": detail,
+            "include_recipes": include_recipes,
+            "max_operations": max_operations,
+        },
+    )
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("detect-events")
+def detect_events(
+    ctx: typer.Context,
+    trace: str | None = typer.Option(None, "--trace", help="Trace id."),
+    finding_index: int | None = typer.Option(None, "--finding-index"),
+    pattern: str | None = typer.Option(None, "--text-pattern"),
+    manual_position: int | None = typer.Option(None, "--position"),
+    input_json: str | None = typer.Option(None, "--json", help="Full request payload."),
+) -> None:
+    """Detect deterministic behavioral events in a trace."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    payload = json.loads(input_json) if input_json else {"trace_id": trace}
+    if trace is not None:
+        payload.setdefault("trace_id", trace)
+    if finding_index is not None:
+        payload.setdefault("finding_index", finding_index)
+    if pattern is not None:
+        payload.setdefault("text_pattern", pattern)
+    if manual_position is not None:
+        payload.setdefault("manual_position", manual_position)
+    envelope = service.call("detect_behavioral_events", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("resolve-event")
+def resolve_event(
+    ctx: typer.Context,
+    artifact: str = typer.Argument(..., help="Behavioral-event artifact id."),
+) -> None:
+    """Report an event's exact token, generation-step, and online timing."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    envelope = service.call("resolve_event_position", {"event_artifact_id": artifact})
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("create-event-trigger")
+def create_event_trigger(
+    ctx: typer.Context,
+    input_json: str = typer.Option(..., "--json", help="Trigger payload."),
+) -> None:
+    """Create a validated declarative event trigger."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    envelope = service.call("create_event_trigger", {"trigger": json.loads(input_json)})
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("event-triggers")
+def event_triggers(
+    ctx: typer.Context,
+    limit: int = typer.Option(50, "--limit"),
+) -> None:
+    """List stored event triggers."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    envelope = service.call("list_event_triggers", {"limit": limit})
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("run-event-intervention")
+def run_event_intervention(
+    ctx: typer.Context,
+    trigger: str | None = typer.Option(None, "--trigger", help="Trigger artifact id."),
+    intervention: str | None = typer.Option(None, "--intervention"),
+    source: str | None = typer.Option(None, "--source", help="JSON replay model source."),
+    trace: str | None = typer.Option(None, "--trace"),
+    event: str | None = typer.Option(None, "--event", help="Retrospective event artifact id."),
+    max_new_tokens: int = typer.Option(8, "--max-new-tokens"),
+    no_identity: bool = typer.Option(False, "--no-identity"),
+    input_json: str | None = typer.Option(None, "--json"),
+) -> None:
+    """Run an online trigger or a retrospective event investigation."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    if input_json:
+        payload = json.loads(input_json)
+    else:
+        payload = {
+            "intervention_artifact_id": intervention,
+            "source": json.loads(source) if source else {"kind": "synthetic"},
+            "max_new_tokens": max_new_tokens,
+            "identity": not no_identity,
+        }
+        if trigger:
+            payload["trigger_artifact_id"] = trigger
+        if trace:
+            payload["trace_id"] = trace
+        if event:
+            payload["event_artifact_id"] = event
+    envelope = service.call("run_event_triggered_intervention", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("prepare-fixed-context")
+def prepare_fixed_context(
+    ctx: typer.Context,
+    trace: str = typer.Option(..., "--trace"),
+    event: list[str] | None = typer.Option(None, "--event"),
+    replay_step: int | None = typer.Option(None, "--replay-step"),
+) -> None:
+    """Reconstruct an exact token prefix for a fixed-context experiment."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    payload: dict[str, Any] = {
+        "trace_id": trace,
+        "event_artifact_ids": list(event or []),
+    }
+    if replay_step is not None:
+        payload["replay_step"] = replay_step
+    envelope = service.call("prepare_fixed_context_replay", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("run-fixed-context")
+def run_fixed_context(
+    ctx: typer.Context,
+    replay: str = typer.Option(..., "--replay"),
+    intervention: str = typer.Option(..., "--intervention"),
+    source: str | None = typer.Option(None, "--source", help="JSON replay model source."),
+    case: str | None = typer.Option(None, "--case"),
+    continuation: str | None = typer.Option(None, "--continuation", help="JSON continuation config."),
+) -> None:
+    """Run baseline, identity, and intervention on one fixed token context."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    payload: dict[str, Any] = {
+        "replay_artifact_id": replay,
+        "intervention_artifact_id": intervention,
+        "source": json.loads(source) if source else {"kind": "synthetic"},
+    }
+    if case:
+        payload["case_id"] = case
+    if continuation:
+        payload["continuation"] = json.loads(continuation)
+    envelope = service.call("run_fixed_context_comparison", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("create-dossier")
+def create_dossier(
+    ctx: typer.Context,
+    title: str = typer.Option(..., "--title"),
+    case: str | None = typer.Option(None, "--case"),
+    trace: str | None = typer.Option(None, "--trace"),
+    event: list[str] | None = typer.Option(None, "--event"),
+    comparison: str | None = typer.Option(None, "--comparison"),
+    summary: str | None = typer.Option(None, "--summary"),
+) -> None:
+    """Create an agent-readable investigation dossier."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    payload: dict[str, Any] = {
+        "title": title,
+        "event_artifact_ids": list(event or []),
+        "fixed_context_comparison_artifact_id": comparison,
+    }
+    if case:
+        payload["case_id"] = case
+    if trace:
+        payload["trace_id"] = trace
+    if summary:
+        payload["summary"] = summary
+    envelope = service.call("create_investigation_dossier", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("inspect-dossier")
+def inspect_dossier(
+    ctx: typer.Context,
+    artifact: str = typer.Argument(..., help="Dossier artifact id."),
+    no_measurements: bool = typer.Option(False, "--no-measurements"),
+) -> None:
+    """Read an investigation dossier with bounded measurements."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    envelope = service.call(
+        "inspect_investigation_dossier",
+        {"dossier_artifact_id": artifact, "include_measurements": not no_measurements},
+    )
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("attach-event-evidence")
+def attach_event_evidence(
+    ctx: typer.Context,
+    title: str = typer.Option(..., "--title"),
+    case: str | None = typer.Option(None, "--case"),
+    trace: str | None = typer.Option(None, "--trace"),
+    event: list[str] | None = typer.Option(None, "--event"),
+    comparison: list[str] | None = typer.Option(None, "--comparison"),
+    dossier: list[str] | None = typer.Option(None, "--dossier"),
+) -> None:
+    """Attach events, comparisons, and dossiers to a failure case."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    payload: dict[str, Any] = {
+        "title": title,
+        "event_artifact_ids": list(event or []),
+        "fixed_context_comparison_artifact_ids": list(comparison or []),
+        "dossier_artifact_ids": list(dossier or []),
+    }
+    if case:
+        payload["case_id"] = case
+    if trace:
+        payload["trace_id"] = trace
+    envelope = service.call("attach_event_evidence", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("recipes")
+def recipes(
+    ctx: typer.Context,
+    group: str | None = typer.Option(None, "--group"),
+) -> None:
+    """List investigation recipes."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    envelope = service.call("list_investigation_recipes", {"group": group})
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("preview-recipe")
+def preview_recipe_command(
+    ctx: typer.Context,
+    recipe_id: str = typer.Argument(..., help="Recipe id."),
+    input_json: str | None = typer.Option(None, "--inputs", help="JSON input object."),
+) -> None:
+    """Preview a recipe before running it."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    envelope = service.call(
+        "preview_investigation_recipe",
+        {"recipe_id": recipe_id, "inputs": json.loads(input_json) if input_json else {}},
+    )
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("run-recipe")
+def run_recipe_command(
+    ctx: typer.Context,
+    recipe_id: str = typer.Argument(..., help="Recipe id."),
+    input_json: str = typer.Option(..., "--inputs", help="JSON input object."),
+) -> None:
+    """Run a high-level investigation recipe."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    envelope = service.call(
+        "run_investigation_recipe",
+        {"recipe_id": recipe_id, "inputs": json.loads(input_json)},
+    )
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("inspect-recipe-run")
+def inspect_recipe_run(
+    ctx: typer.Context,
+    artifact: str = typer.Argument(..., help="Recipe-run artifact id."),
+) -> None:
+    """Read a stored recipe run."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    envelope = service.call("inspect_recipe_run", {"run_artifact_id": artifact})
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()

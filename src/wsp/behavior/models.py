@@ -623,6 +623,10 @@ class InvestigationLink(StrictModel):
     temporal_run_ids: list[str] = Field(default_factory=list)
     composition_ids: list[str] = Field(default_factory=list)
     staged_ids: list[str] = Field(default_factory=list)
+    event_ids: list[str] = Field(default_factory=list)
+    fixed_context_ids: list[str] = Field(default_factory=list)
+    recipe_run_ids: list[str] = Field(default_factory=list)
+    dossier_ids: list[str] = Field(default_factory=list)
     note: str | None = None
 
 

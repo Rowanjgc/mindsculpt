@@ -202,6 +202,54 @@ class StagedRef(StrictModel):
     validity_status: Literal["valid", "limited", "invalid"] = "valid"
 
 
+class EventRef(StrictModel):
+    """A deterministic behavioral event selected for investigation."""
+
+    event_id: str
+    artifact_id: str | None = None
+    event_type: str
+    trace_id: str | None = None
+    token_position: int | None = None
+    generation_step: int | None = None
+    alignment_status: str | None = None
+    observation_mode: str | None = None
+    note: str | None = None
+
+
+class FixedContextRef(StrictModel):
+    """A fixed-context baseline/identity/intervention comparison."""
+
+    comparison_id: str
+    artifact_id: str | None = None
+    replay_id: str | None = None
+    trace_id: str | None = None
+    validity_status: str | None = None
+    identity_agreement: str | None = None
+    consumed_position: int | None = None
+    intervention_delta: float | None = None
+    note: str | None = None
+
+
+class RecipeRunRef(StrictModel):
+    run_id: str
+    artifact_id: str | None = None
+    recipe_id: str
+    status: str
+    steps_completed: int = 0
+    steps_failed: int = 0
+    dossier_id: str | None = None
+    note: str | None = None
+
+
+class DossierRef(StrictModel):
+    dossier_id: str
+    artifact_id: str | None = None
+    title: str | None = None
+    case_id: str | None = None
+    validity_status: str | None = None
+    note: str | None = None
+
+
 class HypothesisNote(StrictModel):
     """A candidate explanation.  Always unverified until an intervention runs."""
 
@@ -236,6 +284,10 @@ class InvestigationEvidence(StrictModel):
     temporal_runs: list[TemporalRunRef] = Field(default_factory=list)
     compositions: list[CompositionRef] = Field(default_factory=list)
     staged_continuations: list[StagedRef] = Field(default_factory=list)
+    events: list[EventRef] = Field(default_factory=list)
+    fixed_context_comparisons: list[FixedContextRef] = Field(default_factory=list)
+    recipe_runs: list[RecipeRunRef] = Field(default_factory=list)
+    dossiers: list[DossierRef] = Field(default_factory=list)
     hypotheses: list[HypothesisNote] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
     stages: list[EvidenceStage] = Field(
@@ -260,6 +312,9 @@ class InvestigationEvidence(StrictModel):
             or self.temporal_runs
             or self.compositions
             or self.staged_continuations
+            or self.events
+            or self.fixed_context_comparisons
+            or self.dossiers
         ):
             raise ValueError(
                 "an investigation record needs at least one finding, replay, capture, "
@@ -292,6 +347,18 @@ class InvestigationEvidence(StrictModel):
         hypothesis_ids = [item.hypothesis_id for item in self.hypotheses]
         if len(set(hypothesis_ids)) != len(hypothesis_ids):
             raise ValueError("hypothesis ids must be unique")
+        event_ids = [item.event_id for item in self.events]
+        if len(set(event_ids)) != len(event_ids):
+            raise ValueError("event ids must be unique")
+        fixed_ids = [item.comparison_id for item in self.fixed_context_comparisons]
+        if len(set(fixed_ids)) != len(fixed_ids):
+            raise ValueError("fixed-context comparison ids must be unique")
+        recipe_ids = [item.run_id for item in self.recipe_runs]
+        if len(set(recipe_ids)) != len(recipe_ids):
+            raise ValueError("recipe run ids must be unique")
+        dossier_ids = [item.dossier_id for item in self.dossiers]
+        if len(set(dossier_ids)) != len(dossier_ids):
+            raise ValueError("dossier ids must be unique")
         known_captures = set(capture_ids)
         for comparison in self.comparisons:
             for capture_id in (comparison.left_capture_id, comparison.right_capture_id):
@@ -378,6 +445,10 @@ def build_evidence(
     temporal_runs: list[TemporalRunRef] | None = None,
     compositions: list[CompositionRef] | None = None,
     staged_continuations: list[StagedRef] | None = None,
+    events: list[EventRef] | None = None,
+    fixed_context_comparisons: list[FixedContextRef] | None = None,
+    recipe_runs: list[RecipeRunRef] | None = None,
+    dossiers: list[DossierRef] | None = None,
     hypotheses: list[HypothesisNote] | None = None,
     notes: list[str] | None = None,
     warnings: list[str] | None = None,
@@ -406,6 +477,10 @@ def build_evidence(
         temporal_runs=list(temporal_runs or []),
         compositions=list(compositions or []),
         staged_continuations=list(staged_continuations or []),
+        events=list(events or []),
+        fixed_context_comparisons=list(fixed_context_comparisons or []),
+        recipe_runs=list(recipe_runs or []),
+        dossiers=list(dossiers or []),
         hypotheses=list(hypotheses or []),
         notes=list(notes or []),
         warnings=list(warnings or []),
@@ -431,13 +506,17 @@ __all__ = [
     "ComparisonRef",
     "CompositionRef",
     "ContinuationRef",
+    "DossierRef",
     "EventLogRef",
+    "EventRef",
     "EvidenceStage",
     "FindingRef",
+    "FixedContextRef",
     "HypothesisNote",
     "InterventionRef",
     "InvestigationEvidence",
     "PlanRef",
+    "RecipeRunRef",
     "ReplayRef",
     "StagedRef",
     "TemporalRunRef",
