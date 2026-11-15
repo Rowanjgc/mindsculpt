@@ -430,7 +430,17 @@ def _investigation_artifact_ids(
             continue
         if not isinstance(evidence, dict):
             continue
-        for key in ("captures", "comparisons", "interventions", "continuations"):
+        for key in (
+            "captures",
+            "comparisons",
+            "interventions",
+            "continuations",
+            "plans",
+            "event_logs",
+            "temporal_runs",
+            "compositions",
+            "staged_continuations",
+        ):
             for reference in evidence.get(key) or []:
                 if not isinstance(reference, dict):
                     continue

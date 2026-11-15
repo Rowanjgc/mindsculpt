@@ -519,6 +519,7 @@ class ToolService:
         from wsp.tools.intervention_handlers import register_intervention_tools
         from wsp.tools.investigation_handlers import register_investigation_tools
         from wsp.tools.replay_handlers import register_replay_tools
+        from wsp.tools.temporal_handlers import register_temporal_tools
 
         register_behavior_tools(self)
         register_replay_tools(self)
@@ -526,6 +527,7 @@ class ToolService:
         register_capture_tools(self)
         register_investigation_tools(self)
         register_intervention_tools(self)
+        register_temporal_tools(self)
 
     # ------------------------------------------------------------------- handlers
 

@@ -1169,5 +1169,273 @@ def attach_intervention_evidence(
     _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
 
 
+def _plan_payload(
+    *,
+    plan: str | None,
+    input_json: str | None,
+    source: str | None,
+    tokens: str | None,
+    trace: str | None,
+) -> dict[str, Any]:
+    if input_json:
+        payload = json.loads(input_json)
+    else:
+        if plan:
+            payload = {"plan_artifact_id": plan}
+        else:
+            payload = {}
+    if source and "source" not in payload:
+        payload["source"] = json.loads(source)
+    if tokens and "token_ids" not in payload:
+        payload["token_ids"] = [int(item) for item in tokens.split(",") if item.strip()]
+    if trace and "trace_id" not in payload:
+        payload["trace_id"] = trace
+    return payload
+
+
+@app.command("create-intervention-plan")
+def create_intervention_plan(
+    ctx: typer.Context,
+    name: str | None = typer.Option(None, "--name"),
+    trace: str | None = typer.Option(None, "--trace", help="Trace id providing the prefix."),
+    tokens: str | None = typer.Option(None, "--tokens", help="Comma-separated prefix token ids."),
+    execution_mode: str = typer.Option("uncached-generation", "--execution-mode"),
+    max_new_tokens: int = typer.Option(8, "--max-new-tokens"),
+    input_json: str | None = typer.Option(None, "--json", help="Full request payload."),
+) -> None:
+    """Create a versioned, multi-site, generation-step-scheduled plan."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    if input_json:
+        payload = json.loads(input_json)
+    else:
+        payload = {"execution_mode": execution_mode, "max_new_tokens": max_new_tokens}
+        if name:
+            payload["name"] = name
+        if trace:
+            payload["trace_id"] = trace
+        if tokens:
+            payload["prompt_token_ids"] = [
+                int(item) for item in tokens.split(",") if item.strip()
+            ]
+    envelope = service.call("create_intervention_plan", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("validate-intervention-plan")
+def validate_intervention_plan(
+    ctx: typer.Context,
+    plan: str = typer.Argument(..., help="Plan artifact id."),
+    source: str | None = typer.Option(None, "--source", help="JSON replay model source."),
+) -> None:
+    """Validate a plan's schedule, targeting, ordering, and budgets."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    payload: dict[str, Any] = {"plan_artifact_id": plan}
+    if source:
+        payload["source"] = json.loads(source)
+    envelope = service.call("validate_intervention_plan", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("preview-intervention-plan")
+def preview_intervention_plan(
+    ctx: typer.Context,
+    plan: str | None = typer.Option(None, "--plan", help="Plan artifact id."),
+    source: str | None = typer.Option(None, "--source", help="JSON replay model source."),
+    tokens: str | None = typer.Option(None, "--tokens", help="Comma-separated prefix token ids."),
+    trace: str | None = typer.Option(None, "--trace", help="Trace id providing the prefix."),
+    input_json: str | None = typer.Option(None, "--json", help="Full request payload."),
+) -> None:
+    """Resolve every scheduled firing without changing any activation."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    payload = _plan_payload(
+        plan=plan, input_json=input_json, source=source, tokens=tokens, trace=trace
+    )
+    envelope = service.call("preview_intervention_plan", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("run-temporal-intervention")
+def run_temporal_intervention(
+    ctx: typer.Context,
+    plan: str | None = typer.Option(None, "--plan", help="Plan artifact id."),
+    source: str | None = typer.Option(None, "--source", help="JSON replay model source."),
+    tokens: str | None = typer.Option(None, "--tokens", help="Comma-separated prefix token ids."),
+    trace: str | None = typer.Option(None, "--trace", help="Trace id providing the prefix."),
+    case: str | None = typer.Option(None, "--case", help="Attach the run to a case id."),
+    no_identity: bool = typer.Option(False, "--no-identity"),
+    input_json: str | None = typer.Option(None, "--json", help="Full request payload."),
+) -> None:
+    """Run untouched, identity, and scheduled-plan conditions."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    payload = _plan_payload(
+        plan=plan, input_json=input_json, source=source, tokens=tokens, trace=trace
+    )
+    payload.setdefault("identity", not no_identity)
+    if case:
+        payload.setdefault("case_id", case)
+    envelope = service.call("run_temporal_intervention", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("inspect-intervention-events")
+def inspect_intervention_events(
+    ctx: typer.Context,
+    artifact: str = typer.Argument(..., help="Event-log or temporal-run artifact id."),
+    run_level: bool = typer.Option(False, "--run", help="Treat the id as a temporal run."),
+    no_events: bool = typer.Option(False, "--no-events", help="Return counts only."),
+    max_entries: int = typer.Option(50, "--max-entries"),
+) -> None:
+    """Inspect applied, missing, not-reached, and rejected intervention events."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    payload: dict[str, Any] = {
+        "include_events": not no_events,
+        "max_entries": max_entries,
+    }
+    if run_level:
+        payload["run_artifact_id"] = artifact
+    else:
+        payload["event_log_artifact_id"] = artifact
+    envelope = service.call("inspect_intervention_events", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("run-compositional-comparison")
+def run_compositional_comparison(
+    ctx: typer.Context,
+    plan_a: str = typer.Option(..., "--plan-a"),
+    plan_b: str = typer.Option(..., "--plan-b"),
+    plan_ab: str = typer.Option(..., "--plan-ab"),
+    source: str | None = typer.Option(None, "--source", help="JSON replay model source."),
+    tokens: str | None = typer.Option(None, "--tokens", help="Comma-separated prefix token ids."),
+    trace: str | None = typer.Option(None, "--trace", help="Trace id providing the prefix."),
+    metric: str = typer.Option("mean_generated_logprob", "--metric"),
+    case: str | None = typer.Option(None, "--case"),
+    input_json: str | None = typer.Option(None, "--json", help="Full request payload."),
+) -> None:
+    """Measure baseline, A, B, and A+B and report descriptive non-additivity."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    if input_json:
+        payload = json.loads(input_json)
+    else:
+        payload = {
+            "plan_a_artifact_id": plan_a,
+            "plan_b_artifact_id": plan_b,
+            "plan_ab_artifact_id": plan_ab,
+            "metric": metric,
+        }
+        if source:
+            payload["source"] = json.loads(source)
+        if tokens:
+            payload["token_ids"] = [int(item) for item in tokens.split(",") if item.strip()]
+        if trace:
+            payload["trace_id"] = trace
+        if case:
+            payload["case_id"] = case
+    envelope = service.call("run_compositional_comparison", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("prepare-staged-generation")
+def prepare_staged_generation(
+    ctx: typer.Context,
+    source: str = typer.Option(..., "--source", help="JSON replay model source."),
+    tokens: str = typer.Option(..., "--tokens", help="Comma-separated prefix token ids."),
+) -> None:
+    """Build a cached generation state and report architecture support."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    envelope = service.call(
+        "prepare_staged_generation",
+        {
+            "source": json.loads(source),
+            "token_ids": [int(item) for item in tokens.split(",") if item.strip()],
+        },
+    )
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("verify-staged-generation")
+def verify_staged_generation(
+    ctx: typer.Context,
+    plan: str | None = typer.Option(None, "--plan"),
+    source: str | None = typer.Option(None, "--source", help="JSON replay model source."),
+    tokens: str | None = typer.Option(None, "--tokens"),
+    trace: str | None = typer.Option(None, "--trace"),
+    isolation: str = typer.Option("recompute", "--isolation"),
+    input_json: str | None = typer.Option(None, "--json", help="Full request payload."),
+) -> None:
+    """Compare an unmodified staged run with the uncached reference."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    payload = _plan_payload(
+        plan=plan, input_json=input_json, source=source, tokens=tokens, trace=trace
+    )
+    payload.setdefault("isolation", isolation)
+    envelope = service.call("verify_staged_generation", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("run-staged-intervention")
+def run_staged_intervention(
+    ctx: typer.Context,
+    plan: str | None = typer.Option(None, "--plan"),
+    source: str | None = typer.Option(None, "--source", help="JSON replay model source."),
+    tokens: str | None = typer.Option(None, "--tokens"),
+    trace: str | None = typer.Option(None, "--trace"),
+    case: str | None = typer.Option(None, "--case"),
+    isolation: str = typer.Option("recompute", "--isolation"),
+    input_json: str | None = typer.Option(None, "--json", help="Full request payload."),
+) -> None:
+    """Run a scheduled plan through a verified staged decoder."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    payload = _plan_payload(
+        plan=plan, input_json=input_json, source=source, tokens=tokens, trace=trace
+    )
+    payload.setdefault("isolation", isolation)
+    if case:
+        payload.setdefault("case_id", case)
+    envelope = service.call("run_staged_intervention", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
+@app.command("attach-temporal-evidence")
+def attach_temporal_evidence(
+    ctx: typer.Context,
+    title: str = typer.Option(..., "--title"),
+    case: str | None = typer.Option(None, "--case"),
+    summary: str | None = typer.Option(None, "--summary"),
+    observation: str | None = typer.Option(None, "--observation"),
+    plan: list[str] | None = typer.Option(None, "--plan"),
+    event_log: list[str] | None = typer.Option(None, "--event-log"),
+    run_id: list[str] | None = typer.Option(None, "--run"),
+    composition: list[str] | None = typer.Option(None, "--composition"),
+    staged: list[str] | None = typer.Option(None, "--staged"),
+    verification: list[str] | None = typer.Option(None, "--verification"),
+    hypothesis: list[str] | None = typer.Option(None, "--hypothesis"),
+    input_json: str | None = typer.Option(None, "--json", help="Full request payload."),
+) -> None:
+    """Attach temporal experiments to a failure case."""
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    if input_json:
+        payload = json.loads(input_json)
+    else:
+        payload = {
+            "title": title,
+            "plan_artifact_ids": list(plan or []),
+            "event_log_artifact_ids": list(event_log or []),
+            "run_artifact_ids": list(run_id or []),
+            "composition_artifact_ids": list(composition or []),
+            "staged_artifact_ids": list(staged or []),
+            "verification_artifact_ids": list(verification or []),
+            "hypotheses": [{"statement": item} for item in hypothesis or []],
+        }
+        if case:
+            payload["case_id"] = case
+        if summary:
+            payload["summary"] = summary
+        if observation:
+            payload["observation_trace_id"] = observation
+    envelope = service.call("attach_temporal_evidence", payload)
+    _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()

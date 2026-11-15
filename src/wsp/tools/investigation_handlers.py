@@ -462,6 +462,13 @@ def inspect_investigation_evidence(
     referenced: list[str] = [item.artifact_id for item in evidence.alignments + evidence.spans]
     referenced += [item.artifact_id for item in evidence.captures]
     referenced += [item.artifact_id for item in evidence.comparisons]
+    referenced += [item.artifact_id for item in evidence.interventions]
+    referenced += [item.artifact_id for item in evidence.continuations]
+    referenced += [item.artifact_id for item in evidence.plans]
+    referenced += [item.artifact_id for item in evidence.event_logs]
+    referenced += [item.artifact_id for item in evidence.temporal_runs]
+    referenced += [item.artifact_id for item in evidence.compositions]
+    referenced += [item.artifact_id for item in evidence.staged_continuations]
     for replay in evidence.replays:
         for candidate in (replay.plan_artifact_id, replay.result_artifact_id):
             if candidate:

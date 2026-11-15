@@ -1194,6 +1194,17 @@ def _redact_investigation_evidence(
         hypotheses.append(item)
     payload["hypotheses"] = hypotheses
 
+    # Temporal references carry identifiers, counts, and enum labels only.  The
+    # one free-form field (a plan note) is scrubbed like every other string.
+    plans: list[Any] = []
+    for plan in payload.get("plans") or []:
+        if not isinstance(plan, dict):
+            continue
+        item = dict(plan)
+        item["note"] = removed.scrub_soft(item.get("note"))
+        plans.append(item)
+    payload["plans"] = plans
+
     privacy = payload.get("privacy")
     if isinstance(privacy, dict):
         privacy = dict(privacy)
@@ -1395,6 +1406,199 @@ def _redact_continuation_comparison(
     return payload
 
 
+def _redact_intervention_plan(
+    payload: dict[str, Any], policy: ExportPolicy, removed: RemovedText
+) -> dict[str, Any]:
+    """``wsp.intervention-plan/1.0``: keep the schedule and target structure."""
+
+    payload = dict(payload)
+    removed.drop(payload.get("name"))
+    payload["name"] = REDACTED
+    if isinstance(payload.get("model"), dict):
+        payload["model"] = scrub_model_ref(payload["model"], removed)
+    removed.drop(payload.get("prompt_token_ids"))
+    payload["prompt_token_ids"] = []
+    removed.drop(payload.get("prompt_sha256"))
+    payload["prompt_sha256"] = None
+    payload["provenance"] = removed.scrub_soft(payload.get("provenance"))
+    payload["notes"] = removed.scrub_soft(payload.get("notes"))
+    payload["metadata"] = removed.scrub_soft(payload.get("metadata"))
+    nested: list[Any] = []
+    for item in payload.get("interventions") or []:
+        if not isinstance(item, dict):
+            continue
+        entry = dict(item)
+        entry["label"] = removed.scrub_soft(entry.get("label"))
+        spec = entry.get("intervention")
+        if isinstance(spec, dict):
+            entry["intervention"] = _redact_intervention_artifact(
+                spec, policy, removed
+            )
+        nested.append(entry)
+    payload["interventions"] = nested
+    payload["checksums"] = {}
+    return payload
+
+
+def _redact_event_log(
+    payload: dict[str, Any], policy: ExportPolicy, removed: RemovedText
+) -> dict[str, Any]:
+    """``wsp.intervention-event-log/1.0``: keep firing structure and statistics."""
+
+    payload = dict(payload)
+    payload["events"] = [
+        _redact_event_entry(item, removed)
+        for item in payload.get("events") or []
+        if isinstance(item, dict)
+    ]
+    payload["rejected_events"] = [
+        _redact_event_entry(item, removed)
+        for item in payload.get("rejected_events") or []
+        if isinstance(item, dict)
+    ]
+    payload["metadata"] = removed.scrub_soft(payload.get("metadata"))
+    payload["checksums"] = {}
+    return payload
+
+
+def _redact_event_entry(item: dict[str, Any], removed: RemovedText) -> dict[str, Any]:
+    entry = dict(item)
+    entry["label"] = removed.scrub_soft(entry.get("label"))
+    entry["rejection_reason"] = removed.scrub_soft(entry.get("rejection_reason"))
+    entry["provenance"] = removed.scrub_soft(entry.get("provenance"))
+    # Row and token *indices* are positions, not token identifiers, so they
+    # remain interpretable; no generated text or token id is present here.
+    return entry
+
+
+def _redact_condition_sequences(item: dict[str, Any], removed: RemovedText) -> dict[str, Any]:
+    entry = dict(item)
+    removed.drop(entry.get("generated_token_ids"))
+    entry["generated_token_ids"] = []
+    removed.drop(entry.get("generated_text"))
+    entry["generated_text"] = None
+    entry["logprobs"] = []
+    entry["top1_token_ids"] = []
+    entry["errors"] = removed.scrub_string_list(entry.get("errors"))
+    return entry
+
+
+def _redact_temporal_run(
+    payload: dict[str, Any], policy: ExportPolicy, removed: RemovedText
+) -> dict[str, Any]:
+    """``wsp.temporal-intervention/1.0``: keep counts, validity, and logit diffs."""
+
+    payload = dict(payload)
+    if isinstance(payload.get("model"), dict):
+        payload["model"] = scrub_model_ref(payload["model"], removed)
+    removed.drop(payload.get("prompt_sha256"))
+    payload["prompt_sha256"] = None
+    payload["conditions"] = [
+        _redact_condition_sequences(item, removed)
+        for item in payload.get("conditions") or []
+        if isinstance(item, dict)
+    ]
+    identity = payload.get("identity_control")
+    if isinstance(identity, dict):
+        identity = dict(identity)
+        identity["detail"] = removed.scrub_soft(identity.get("detail"))
+        payload["identity_control"] = identity
+    _scrub_validation_text(payload, removed)
+    payload["metadata"] = removed.scrub_soft(payload.get("metadata"))
+    payload["warnings"] = removed.scrub_string_list(payload.get("warnings"))
+    payload["checksums"] = {}
+    return payload
+
+
+def _redact_composition(
+    payload: dict[str, Any], policy: ExportPolicy, removed: RemovedText
+) -> dict[str, Any]:
+    """``wsp.compositional-comparison/1.0``: keep numeric contrasts only."""
+
+    payload = dict(payload)
+    if isinstance(payload.get("model"), dict):
+        payload["model"] = scrub_model_ref(payload["model"], removed)
+    removed.drop(payload.get("prompt_sha256"))
+    payload["prompt_sha256"] = None
+    payload["conditions"] = [
+        _redact_condition_sequences(item, removed)
+        for item in payload.get("conditions") or []
+        if isinstance(item, dict)
+    ]
+    for effect in payload.get("pairwise") or []:
+        if not isinstance(effect, dict):
+            continue
+        for step in effect.get("stepwise") or []:
+            if isinstance(step, dict):
+                step["token_uncached"] = None
+                step["token_staged"] = None
+    identity = payload.get("identity_control")
+    if isinstance(identity, dict):
+        identity = dict(identity)
+        identity["detail"] = removed.scrub_soft(identity.get("detail"))
+        payload["identity_control"] = identity
+    _scrub_validation_text(payload, removed)
+    payload["metadata"] = removed.scrub_soft(payload.get("metadata"))
+    payload["warnings"] = removed.scrub_string_list(payload.get("warnings"))
+    payload["checksums"] = {}
+    return payload
+
+
+def _redact_staged_verification(
+    payload: dict[str, Any], policy: ExportPolicy, removed: RemovedText
+) -> dict[str, Any]:
+    """``wsp.staged-verification/1.0``: keep agreement structure, not token ids."""
+
+    payload = dict(payload)
+    if isinstance(payload.get("model"), dict):
+        payload["model"] = scrub_model_ref(payload["model"], removed)
+    removed.drop(payload.get("prompt_sha256"))
+    payload["prompt_sha256"] = None
+    for step in payload.get("steps_detail") or []:
+        if isinstance(step, dict):
+            step["token_uncached"] = None
+            step["token_staged"] = None
+    _scrub_validation_text(payload, removed)
+    payload["metadata"] = removed.scrub_soft(payload.get("metadata"))
+    payload["warnings"] = removed.scrub_string_list(payload.get("warnings"))
+    payload["checksums"] = {}
+    return payload
+
+
+def _redact_staged_continuation(
+    payload: dict[str, Any], policy: ExportPolicy, removed: RemovedText
+) -> dict[str, Any]:
+    """``wsp.staged-continuation/1.0``: keep verified structure and timings."""
+
+    payload = dict(payload)
+    if isinstance(payload.get("model"), dict):
+        payload["model"] = scrub_model_ref(payload["model"], removed)
+    removed.drop(payload.get("prompt_sha256"))
+    payload["prompt_sha256"] = None
+    payload["conditions"] = [
+        _redact_condition_sequences(item, removed)
+        for item in payload.get("conditions") or []
+        if isinstance(item, dict)
+    ]
+    verification = payload.get("verification")
+    if isinstance(verification, dict):
+        payload["verification"] = _redact_staged_verification(verification, policy, removed)
+    for step in payload.get("stepwise_logits") or []:
+        if isinstance(step, dict):
+            step["token_uncached"] = None
+            step["token_staged"] = None
+    identity = payload.get("identity_control")
+    if isinstance(identity, dict):
+        identity = dict(identity)
+        identity["detail"] = removed.scrub_soft(identity.get("detail"))
+        payload["identity_control"] = identity
+    _scrub_validation_text(payload, removed)
+    payload["metadata"] = removed.scrub_soft(payload.get("metadata"))
+    payload["warnings"] = removed.scrub_string_list(payload.get("warnings"))
+    payload["checksums"] = {}
+    return payload
+
+
 def _redact_artifact_json_generic(
     payload: dict[str, Any], policy: ExportPolicy, removed: RemovedText
 ) -> dict[str, Any]:
@@ -1449,6 +1653,12 @@ JSON_TRANSFORMERS: dict[str, Callable[..., dict[str, Any]]] = {
     "intervention_result": _redact_intervention_result,
     "counterfactual_comparison": _redact_counterfactual_comparison,
     "continuation_comparison": _redact_continuation_comparison,
+    "intervention_plan": _redact_intervention_plan,
+    "intervention_event_log": _redact_event_log,
+    "temporal_intervention": _redact_temporal_run,
+    "compositional_comparison": _redact_composition,
+    "staged_verification": _redact_staged_verification,
+    "staged_continuation": _redact_staged_continuation,
 }
 
 
@@ -1487,6 +1697,30 @@ def _artifact_model(kind: str) -> Any:
         from wsp.interventions.models import ContinuationComparison
 
         return ContinuationComparison
+    if kind == "intervention_plan":
+        from wsp.interventions.plan import InterventionPlan
+
+        return InterventionPlan
+    if kind == "intervention_event_log":
+        from wsp.interventions.plan_models import InterventionEventLog
+
+        return InterventionEventLog
+    if kind == "temporal_intervention":
+        from wsp.interventions.plan_models import TemporalInterventionRun
+
+        return TemporalInterventionRun
+    if kind == "compositional_comparison":
+        from wsp.interventions.plan_models import CompositionalComparison
+
+        return CompositionalComparison
+    if kind == "staged_verification":
+        from wsp.interventions.plan_models import StagedVerification
+
+        return StagedVerification
+    if kind == "staged_continuation":
+        from wsp.interventions.plan_models import StagedContinuation
+
+        return StagedContinuation
     return None
 
 

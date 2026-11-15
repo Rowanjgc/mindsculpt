@@ -619,6 +619,10 @@ class InvestigationLink(StrictModel):
     comparison_ids: list[str] = Field(default_factory=list)
     intervention_ids: list[str] = Field(default_factory=list)
     continuation_ids: list[str] = Field(default_factory=list)
+    plan_ids: list[str] = Field(default_factory=list)
+    temporal_run_ids: list[str] = Field(default_factory=list)
+    composition_ids: list[str] = Field(default_factory=list)
+    staged_ids: list[str] = Field(default_factory=list)
     note: str | None = None
 
 

@@ -132,6 +132,76 @@ class ContinuationRef(StrictModel):
     note: str | None = None
 
 
+class PlanRef(StrictModel):
+    """A versioned multi-site intervention plan."""
+
+    plan_id: str
+    artifact_id: str
+    plan_kind: Literal["intervention", "identity-control"] = "intervention"
+    execution_mode: str
+    interventions: int = Field(default=0, ge=0)
+    scheduled_events: int = Field(default=0, ge=0)
+    schedule_kinds: list[str] = Field(default_factory=list)
+    note: str | None = None
+
+
+class EventLogRef(StrictModel):
+    """The applied/skipped/rejected firing record for one condition."""
+
+    log_id: str
+    artifact_id: str
+    plan_id: str
+    condition: str
+    execution_mode: str
+    steps_executed: int = Field(default=0, ge=0)
+    fired: int = Field(default=0, ge=0)
+    missing: int = Field(default=0, ge=0)
+    not_reached: int = Field(default=0, ge=0)
+    rejected: int = Field(default=0, ge=0)
+    truncated: bool = False
+
+
+class TemporalRunRef(StrictModel):
+    """A scheduled intervention compared with untouched and identity runs."""
+
+    run_id: str
+    artifact_id: str
+    plan_id: str
+    validity_status: Literal["valid", "limited", "invalid"] = "valid"
+    identity_agreement: Literal["exact", "within_tolerance", "failed", "not-performed"] = (
+        "not-performed"
+    )
+    first_divergence: int | None = Field(default=None, ge=0)
+    events_fired: int = Field(default=0, ge=0)
+    events_missing: int = Field(default=0, ge=0)
+
+
+class CompositionRef(StrictModel):
+    """Individual and combined intervention measurements."""
+
+    comparison_id: str
+    artifact_id: str
+    plan_ids: list[str] = Field(default_factory=list)
+    metric: str
+    interaction: float | None = None
+    validity_status: Literal["valid", "limited", "invalid"] = "valid"
+
+
+class StagedRef(StrictModel):
+    """A staged/cached continuation and the verification that licenses it."""
+
+    continuation_id: str
+    artifact_id: str
+    plan_id: str
+    verification_id: str | None = None
+    verification_artifact_id: str | None = None
+    architecture_class: str | None = None
+    agreement: Literal["exact", "within_tolerance", "failed", "not-performed"] = (
+        "not-performed"
+    )
+    validity_status: Literal["valid", "limited", "invalid"] = "valid"
+
+
 class HypothesisNote(StrictModel):
     """A candidate explanation.  Always unverified until an intervention runs."""
 
@@ -161,6 +231,11 @@ class InvestigationEvidence(StrictModel):
     comparisons: list[ComparisonRef] = Field(default_factory=list)
     interventions: list[InterventionRef] = Field(default_factory=list)
     continuations: list[ContinuationRef] = Field(default_factory=list)
+    plans: list[PlanRef] = Field(default_factory=list)
+    event_logs: list[EventLogRef] = Field(default_factory=list)
+    temporal_runs: list[TemporalRunRef] = Field(default_factory=list)
+    compositions: list[CompositionRef] = Field(default_factory=list)
+    staged_continuations: list[StagedRef] = Field(default_factory=list)
     hypotheses: list[HypothesisNote] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
     stages: list[EvidenceStage] = Field(
@@ -181,6 +256,10 @@ class InvestigationEvidence(StrictModel):
             or self.comparisons
             or self.interventions
             or self.continuations
+            or self.plans
+            or self.temporal_runs
+            or self.compositions
+            or self.staged_continuations
         ):
             raise ValueError(
                 "an investigation record needs at least one finding, replay, capture, "
@@ -198,6 +277,18 @@ class InvestigationEvidence(StrictModel):
         continuation_ids = [item.continuation_id for item in self.continuations]
         if len(set(continuation_ids)) != len(continuation_ids):
             raise ValueError("continuation ids must be unique")
+        plan_ids = [item.plan_id for item in self.plans]
+        if len(set(plan_ids)) != len(plan_ids):
+            raise ValueError("plan ids must be unique")
+        run_ids = [item.run_id for item in self.temporal_runs]
+        if len(set(run_ids)) != len(run_ids):
+            raise ValueError("temporal run ids must be unique")
+        composition_ids = [item.comparison_id for item in self.compositions]
+        if len(set(composition_ids)) != len(composition_ids):
+            raise ValueError("composition ids must be unique")
+        staged_ids = [item.continuation_id for item in self.staged_continuations]
+        if len(set(staged_ids)) != len(staged_ids):
+            raise ValueError("staged continuation ids must be unique")
         hypothesis_ids = [item.hypothesis_id for item in self.hypotheses]
         if len(set(hypothesis_ids)) != len(hypothesis_ids):
             raise ValueError("hypothesis ids must be unique")
@@ -233,6 +324,22 @@ class InvestigationEvidence(StrictModel):
     def continuation_ids(self) -> list[str]:
         return [item.continuation_id for item in self.continuations]
 
+    @property
+    def plan_ids(self) -> list[str]:
+        return [item.plan_id for item in self.plans]
+
+    @property
+    def temporal_run_ids(self) -> list[str]:
+        return [item.run_id for item in self.temporal_runs]
+
+    @property
+    def composition_ids(self) -> list[str]:
+        return [item.comparison_id for item in self.compositions]
+
+    @property
+    def staged_ids(self) -> list[str]:
+        return [item.continuation_id for item in self.staged_continuations]
+
 
 def evidence_checksum(record: InvestigationEvidence) -> str:
     """Checksum over the record with its own checksums and timestamp removed."""
@@ -266,6 +373,11 @@ def build_evidence(
     comparisons: list[ComparisonRef] | None = None,
     interventions: list[InterventionRef] | None = None,
     continuations: list[ContinuationRef] | None = None,
+    plans: list[PlanRef] | None = None,
+    event_logs: list[EventLogRef] | None = None,
+    temporal_runs: list[TemporalRunRef] | None = None,
+    compositions: list[CompositionRef] | None = None,
+    staged_continuations: list[StagedRef] | None = None,
     hypotheses: list[HypothesisNote] | None = None,
     notes: list[str] | None = None,
     warnings: list[str] | None = None,
@@ -289,6 +401,11 @@ def build_evidence(
         comparisons=list(comparisons or []),
         interventions=list(interventions or []),
         continuations=list(continuations or []),
+        plans=list(plans or []),
+        event_logs=list(event_logs or []),
+        temporal_runs=list(temporal_runs or []),
+        compositions=list(compositions or []),
+        staged_continuations=list(staged_continuations or []),
         hypotheses=list(hypotheses or []),
         notes=list(notes or []),
         warnings=list(warnings or []),
@@ -312,13 +429,18 @@ __all__ = [
     "ArtifactLink",
     "CaptureRef",
     "ComparisonRef",
+    "CompositionRef",
     "ContinuationRef",
+    "EventLogRef",
     "EvidenceStage",
     "FindingRef",
     "HypothesisNote",
     "InterventionRef",
     "InvestigationEvidence",
+    "PlanRef",
     "ReplayRef",
+    "StagedRef",
+    "TemporalRunRef",
     "build_evidence",
     "evidence_checksum",
     "new_hypothesis_id",
