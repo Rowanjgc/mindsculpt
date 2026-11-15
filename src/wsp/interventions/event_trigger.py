@@ -734,8 +734,8 @@ def run_online_event_trigger(
     stepwise, first_logit_diff = _stepwise_diff(
         baseline_logits,
         intervention_logits,
-        baseline_tokens=baseline_tokens,
-        other_tokens=intervention_tokens,
+        baseline_tokens=baseline.generated_token_ids,
+        other_tokens=intervention.generated_token_ids,
     )
     first_divergence = _token_divergence(
         baseline.generated_token_ids, intervention.generated_token_ids
