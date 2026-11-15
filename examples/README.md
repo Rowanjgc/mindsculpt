@@ -129,6 +129,33 @@ wsp --workspace examples/out/workspace call apply_patch \
   --json '{"path":"examples/out/tiny_mlp.safetensors","output_path":"examples/out/cli_patched.safetensors","patch_ids":["p_..."]}'
 ```
 
+## 7. Temporal and compositional interventions
+
+```bash
+python examples/temporal_intervention_walkthrough.py
+```
+
+This runs the V1.4 chain end-to-end against the tiny deterministic transformer,
+offline:
+
+- records a baseline behavioral trace and selects a generation step;
+- creates, validates, and previews a scheduled zero-ablation plan;
+- derives the matching identity plan and checks baseline/identity agreement;
+- executes the scheduled ablation and reports exactly where it fired;
+- compares downstream logits, generated tokens, and first divergence;
+- adds a second intervention at another module and another step;
+- runs A, B, and A+B and reports the interaction contrast;
+- prepares, verifies, and executes a staged cached continuation, comparing it
+  against the uncached reference;
+- attaches the experiment to a failure case, exports it privately and in
+  redacted mode, reloads both bundles into fresh workspaces, verifies checksums
+  and references, and confirms that parameters, buffers, and hooks are restored.
+
+Pass `--workspace <path>` to keep the generated workspace. The script prints
+`[1]`–`[24]` stage markers. It demonstrates infrastructure correctness, not a
+scientific discovery, and it does not claim that any measured interaction is a
+mechanism.
+
 ## Cleanup
 
 All generated files live under `examples/out/`, which is excluded from Git.
