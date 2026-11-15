@@ -74,6 +74,21 @@ class Budget(BaseModel):
     max_continuation_tokens: int = Field(default=64, gt=0)
     max_continuation_sequence_tokens: int = Field(default=4_096, gt=0)
 
+    # Deterministic behavioral events and event-triggered interventions
+    max_event_sequence_tokens: int = Field(default=20_000, gt=0)
+    max_event_lookback: int = Field(default=512, gt=0)
+    max_events_per_trace: int = Field(default=64, gt=0)
+    max_trigger_occurrences: int = Field(default=16, gt=0)
+    max_trigger_delay: int = Field(default=64, gt=0)
+    max_triggered_interventions: int = Field(default=32, gt=0)
+    max_fixed_context_positions: int = Field(default=64, gt=0)
+
+    # Investigation recipes and dossiers
+    max_recipe_steps: int = Field(default=32, gt=0)
+    max_recipe_forward_passes: int = Field(default=24, gt=0)
+    max_recipe_artifacts: int = Field(default=128, gt=0)
+    max_dossier_artifacts: int = Field(default=128, gt=0)
+
     # Temporal plans, compositional comparisons, and staged generation
     max_generation_steps: int = Field(default=64, gt=0)
     max_scheduled_events: int = Field(default=64, gt=0)
