@@ -281,9 +281,9 @@ silently.
 
 ## Known V1.2 gaps
 
-- No MCP server is included. The JSON schemas and service layer are designed so
-  a thin adapter can be added without changing core logic.
-- No general model registry or remote checkpoint download.
+- The MCP stdio adapter (`docs/mcp.md`) is a thin transport only: it serves the
+  existing registry, adds no operations, exposes no resources/prompts, listens
+  only on stdio, and is not a security boundary.- No general model registry or remote checkpoint download.
 - No activation capture during generation with KV caches.
 - No pooled activation aggregation over raw values; aggregation is over
   summary statistics (`mean_of_summaries`) and states this.

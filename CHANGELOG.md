@@ -15,6 +15,12 @@ not changelog entries until implemented.
 - GitHub Actions CI: CPU-only offline test suite on Python 3.11–3.13.
 - `CHANGELOG.md` and `CONTRIBUTING.md`.
 - Git tags for the historical releases (`v0.1.0` … `v0.5.0`).
+- **MCP stdio adapter** (`wsp mcp`, optional `mcp` extra): the shared
+  `ToolService` registry served over the Model Context Protocol as a thin
+  transport with verbatim `wsp.tool/1.0` envelope passthrough, structured
+  error results, schemas generated from the same pydantic input models, and
+  workspace/limitation notes in tool descriptions. See
+  [`docs/mcp.md`](docs/mcp.md).
 
 ## [0.5.0] — V1.5: event-driven investigation
 

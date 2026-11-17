@@ -7,12 +7,39 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
+import pytest
+
 from wsp.cli.main import app
 from wsp.tools.service import ToolService
 
 
 def _json(output: str) -> dict:
     return json.loads(output)
+
+
+def test_cli_mcp_command_lists_in_help() -> None:
+    runner = CliRunner()
+    help_result = runner.invoke(app, ["mcp", "--help"])
+    assert help_result.exit_code == 0
+    assert "MCP" in help_result.stdout
+
+
+def test_cli_mcp_server_exits_cleanly_on_eof() -> None:
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; sys.argv = ['wsp', 'mcp']; from wsp.cli.main import app; app()",
+        ],
+        input=b"",
+        capture_output=True,
+        timeout=60,
+    )
+    # An immediate EOF (no client) must shut the stdio server down cleanly.
+    assert result.returncode == 0, result.stderr.decode(errors="replace")
 
 
 def test_cli_help_and_operation_registry(mlp_checkpoint: Path) -> None:

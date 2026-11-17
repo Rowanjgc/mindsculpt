@@ -29,7 +29,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pytest-cov>=5"]
+dev = ["pytest>=8", "pytest-cov>=5", "mcp==2.3.0"]
+# Optional MCP stdio transport for the tool registry.  Never required for the
+# Python API or CLI; pinned to the version this release was validated against.
+mcp = ["mcp==2.3.0"]
 hf = ["transformers>=4.40"]
 # Optional instrumentation backend.  Never required: the CPU-only core captures
 # activations through plain PyTorch forward hooks.  Pinned to the versions this
@@ -53,4 +56,5 @@ markers = [
   "hf: requires the optional transformers dependency",
   "gpu: requires a CUDA-capable device",
   "real_model: requires WSP_REAL_MODEL to point at a local pretrained checkpoint",
+  "mcp: requires the optional mcp dependency",
 ]

@@ -407,6 +407,8 @@ result = service.call("inspect_model", {"path": "examples/out/tiny_mlp.safetenso
   evaluated upstream projects, tested versions, and integration decisions.
 - [`docs/tool-api.md`](docs/tool-api.md) — every structured operation, schemas,
   errors, limits, and examples.
+- [`docs/mcp.md`](docs/mcp.md) — serving the registry over the Model Context
+  Protocol: a thin stdio transport with envelope passthrough.
 - [`docs/causal-interventions.md`](docs/causal-interventions.md) — intervention
   specs, zero/mean/identity/donor operations, validation, paired measurement,
   and limitations.

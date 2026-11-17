@@ -169,6 +169,33 @@ def call_operation(
     _emit(envelope, exit_code=0 if envelope.get("ok") else 1)
 
 
+@app.command("mcp")
+def mcp(ctx: typer.Context) -> None:
+    """Serve the tool registry over the MCP stdio transport (optional 'mcp' extra)."""
+    try:
+        from wsp.mcp.server import run_stdio
+    except ModuleNotFoundError as exc:
+        if exc.name != "mcp":
+            raise
+        _emit(
+            {
+                "schema_version": "wsp.mcp/1.0",
+                "ok": False,
+                "error": {
+                    "code": "unsupported",
+                    "message": (
+                        "the MCP server requires the optional 'mcp' dependency; "
+                        'install it with: pip install -e ".[mcp]"'
+                    ),
+                    "details": {},
+                },
+            },
+            exit_code=1,
+        )
+    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    run_stdio(service)
+
+
 @app.command("status")
 def status(ctx: typer.Context) -> None:
     """Report workspace status."""
