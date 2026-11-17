@@ -548,9 +548,13 @@ def test_staged_generation_support_is_reported_not_assumed(
     module = model.module if hasattr(model, "module") else model.model
     architecture, reason = classify_hf_architecture(module)
 
+    # Capability probe: request the envelope form so an explicit
+    # "unsupported" rejection is reported, not raised (the module fixture
+    # uses raise_errors=True to surface unexpected failures).
     prepared = service.call(
         "prepare_staged_generation",
         {"source": source, "token_ids": prompt, "max_new_tokens": 2},
+        raise_errors=False,
     )
     if architecture == "hybrid-recurrent":
         assert prepared["ok"] is False, prepared
