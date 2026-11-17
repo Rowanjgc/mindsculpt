@@ -38,6 +38,10 @@ configuration looks like this (any MCP client):
 }
 ```
 
+A first scripted agent-style evaluation of this surface — what an agent can
+recover from descriptions, schemas, instructions, and envelopes alone — is
+recorded in [`agent-evaluation.md`](agent-evaluation.md).
+
 `--workspace` and `--budget` options pass through to the service layer as in
 every other command:
 

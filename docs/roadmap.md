@@ -389,7 +389,9 @@ assets are bundled here.
 
 ## Candidate next work
 
-- Evaluate the high-level recipes with actual general-purpose language models.
+- Evaluate the high-level recipes with actual general-purpose language models
+  (a first scripted, non-autonomous evaluation through MCP is recorded in
+  `agent-evaluation.md`).
 - Add a controlled comparison of recipe use versus low-level tool composition.
 - Explore explicitly labelled semantic event detectors, without making a model
   judge mandatory.

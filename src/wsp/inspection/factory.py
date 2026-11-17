@@ -21,6 +21,12 @@ def open_checkpoint(
     display_name: str | None = None,
 ) -> CheckpointSource:
     candidate = Path(path).expanduser()
+    if candidate.is_dir():
+        raise InputError(
+            "checkpoint path is a directory; pass the .safetensors weights file "
+            "inside it (for example model.safetensors)",
+            details={"path": str(candidate)},
+        )
     if candidate.suffix.lower() != ".safetensors":
         raise UnsupportedError(
             "only .safetensors checkpoints are opened automatically; "

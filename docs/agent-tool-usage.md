@@ -118,6 +118,10 @@ not silently retry with weaker validation.
 
 ## Current status
 
-Tool accessibility has **not** been evaluated with general-purpose language
-models yet. V1.5 supplies the metadata, recipes, and dossiers needed for such an
-evaluation; it does not claim that the evaluation has happened.
+A first evaluation — scripted, not autonomous — against a real hybrid
+checkpoint through the MCP transport is recorded in
+[agent-evaluation.md](agent-evaluation.md). The call → error → corrected-call
+recovery loop worked at every failure point with zero source reading; the
+metadata, recipes, and dossiers supplied here were sufficient in principle.
+Evaluation with actual general-purpose language models (autonomous judgment,
+prompt robustness, context budgets) remains open.

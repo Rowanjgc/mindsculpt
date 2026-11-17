@@ -409,6 +409,8 @@ result = service.call("inspect_model", {"path": "examples/out/tiny_mlp.safetenso
   errors, limits, and examples.
 - [`docs/mcp.md`](docs/mcp.md) — serving the registry over the Model Context
   Protocol: a thin stdio transport with envelope passthrough.
+- [`docs/agent-evaluation.md`](docs/agent-evaluation.md) — first (scripted)
+  evaluation of the tool surface the way a tool-using agent reaches it.
 - [`docs/causal-interventions.md`](docs/causal-interventions.md) — intervention
   specs, zero/mean/identity/donor operations, validation, paired measurement,
   and limitations.

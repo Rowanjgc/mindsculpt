@@ -179,6 +179,18 @@ def test_pickle_and_unknown_checkpoints_are_rejected(tmp_path: Path) -> None:
         open_checkpoint(bad)
 
 
+def test_directory_checkpoint_path_gets_actionable_error(tmp_path: Path) -> None:
+    # Real failure seen during the MCP agent trial: passing a Hugging Face
+    # snapshot directory instead of the weights file inside it produced a
+    # misleading "pickle-based checkpoints are not supported" error.
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    with pytest.raises(InputError) as info:
+        open_checkpoint(snapshot)
+    assert "directory" in str(info.value)
+    assert "model.safetensors" in str(info.value)
+
+
 def test_float8_numeric_read_is_explicitly_unsupported(tmp_path: Path) -> None:
     from safetensors.numpy import save_file as save_numpy
 

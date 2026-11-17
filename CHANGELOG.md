@@ -21,6 +21,15 @@ not changelog entries until implemented.
   error results, schemas generated from the same pydantic input models, and
   workspace/limitation notes in tool descriptions. See
   [`docs/mcp.md`](docs/mcp.md).
+- First (scripted, non-autonomous) agent evaluation of the tool surface
+  through MCP on a real hybrid checkpoint. See
+  [`docs/agent-evaluation.md`](docs/agent-evaluation.md).
+
+### Fixed
+
+- `inspect_model` on a directory path now fails with an actionable
+  `InputError` ("pass the `.safetensors` weights file inside it") instead of a
+  misleading pickle-support message.
 
 ## [0.5.0] — V1.5: event-driven investigation
 
