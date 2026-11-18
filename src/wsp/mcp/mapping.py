@@ -24,8 +24,9 @@ _MAX_DESCRIPTION_LIMITATIONS = 3
 _MAX_DESCRIPTION_CHARS = 2000
 
 _WORKSPACE_NOTE = (
-    "Requires an initialized workspace (run 'wsp init') so artifacts, patches, "
-    "and run records can be stored."
+    "Requires an initialized workspace so artifacts, patches, and run records "
+    "can be stored. Start 'wsp mcp' with an initialized workspace, or pass "
+    "--auto-init to create one at startup."
 )
 
 
@@ -102,7 +103,10 @@ def server_instructions() -> str:
         "returns a wsp.tool/1.0 envelope with ok, data, artifacts, and warnings; "
         "failed operations return ok=false with a structured error and are never "
         "retried silently. Call discover_capabilities first for progressive "
-        "disclosure of operation groups, prerequisites, and limitations. Resource "
-        "budgets bound every operation; oversized requests fail cleanly instead "
-        "of truncating."
+        "disclosure of operation groups, prerequisites, and limitations. If an "
+        "operation reports that a workspace is required, the server must be "
+        "started with an initialized workspace (create one with "
+        "'wsp init --path <dir>', or restart 'wsp mcp' with --auto-init). "
+        "Resource budgets bound every operation; oversized requests fail "
+        "cleanly instead of truncating."
     )

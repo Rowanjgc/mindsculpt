@@ -149,13 +149,14 @@ class MeasurementBuilder:
             return
         dim = self.sequence_dim(tuple(int(d) for d in tensor.shape))
         if dim is None:
+            shape = tuple(int(d) for d in tensor.shape)
             self.skip(
                 module,
-                tuple(int(d) for d in tensor.shape),
+                shape,
                 (
                     "tensor does not expose an unambiguous sequence dimension of length "
-                    f"{self.sequence_length}; capture skipped (set other modules or use a "
-                    "single-token module)"
+                    f"{self.sequence_length}; observed shape {list(shape)}; capture skipped "
+                    "(set other modules or use a single-token module)"
                 ),
             )
             return

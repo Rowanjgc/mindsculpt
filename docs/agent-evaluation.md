@@ -88,17 +88,23 @@ Numbered for reference; each notes its disposition.
 
 1. **`--workspace` is not accepted by the subcommand.**
    `wsp mcp --help` shows no `--workspace` option; it is a global option on
-   the parent `wsp` command, so `wsp mcp --workspace X` fails. Documented in
-   `mcp.md` (client configs must pass it at the top level). Candidate: accept
-   the option on the subcommand as well. **Open.**
+   the parent `wsp` command, so `wsp mcp --workspace X` fails.
+   **Fixed**: the subcommand now accepts `--workspace/-w` and `--budget`
+   directly (they override the global options).
 2. **Uninitialized workspace kills the server silently (as far as the client
    can tell).** The server exits with a raw traceback at startup; an MCP
-   client only sees "Connection closed" with zero diagnostics. Candidate:
-   a clean startup error, create-on-demand, or a pre-init usable
-   `workspace_status`. **Open.**
+   client only sees "Connection closed" with zero diagnostics.
+   **Fixed**: `wsp mcp` now validates the workspace before starting and, on
+   failure, writes the structured `wsp.mcp/1.0` error envelope to stderr and
+   exits 1 (clients surface stderr on connection failure). A new
+   `--auto-init` flag creates and initializes a missing workspace at
+   startup.
 3. **Workspace notes assume a shell.** Tool descriptions say to
-   `run 'wsp init'`, but an MCP agent has no shell. Reword for the MCP
-   surface or auto-init. **Open.**
+   `run 'wsp init'`, but an MCP agent has no shell.
+   **Fixed**: workspace notes and runtime hints now name the agent-relevant
+   actions — start `wsp mcp` with an initialized workspace, or restart with
+   `--auto-init` — and two hints that referenced a nonexistent
+   `wsp workspace init` command were corrected to `wsp init`.
 4. **Directory paths to `inspect_model` produced a misleading error.**
    Passing a Hugging Face snapshot directory returned
    `UnsupportedError "…pickle-based checkpoints are not supported for
@@ -109,12 +115,17 @@ Numbered for reference; each notes its disposition.
    (`test_directory_checkpoint_path_gets_actionable_error`).
 5. **Deeply nested success data.** `record_trace` puts its summary under
    `summary.trace.artifact.metadata`; discoverable in a couple of probes, but
-   the first probe does miss. **Open (minor).**
+   the first probe does miss. **Documented** (see
+   `agent-tool-usage.md`); restructuring the versioned summary envelope is
+   out of scope for now. **Open (minor).**
 6. **Naive module choice on hybrid models wastes a call.** Captures over
    non-attention modules are skipped with an actionable warning, but
    `list_capture_points` does not pre-annotate which modules expose a
-   sequence dimension suitable for capture. Candidate: annotate capture
-   points. **Open.**
+   sequence dimension suitable for capture. **Partially improved**: the skip
+   warning now includes the observed tensor shape, which makes the next
+   choice concrete. A static suitability annotation is not possible without
+   runtime shapes, so `list_capture_points` remains unannotated. **Open
+   (candidate).**
 7. **Version metadata staleness.** After a version bump, a stale editable
    install still reported the old version through MCP `serverInfo`. Process
    note: refresh the editable install (`uv pip install -e . --no-deps` or

@@ -31,7 +31,7 @@ configuration looks like this (any MCP client):
   "mcpServers": {
     "wsp-workbench": {
       "command": ".venv/bin/wsp",
-      "args": ["mcp"],
+      "args": ["mcp", "--auto-init"],
       "cwd": "/path/to/project"
     }
   }
@@ -43,10 +43,23 @@ recover from descriptions, schemas, instructions, and envelopes alone — is
 recorded in [`agent-evaluation.md`](agent-evaluation.md).
 
 `--workspace` and `--budget` options pass through to the service layer as in
-every other command:
+every other command. They work both as global options before the subcommand
+and directly on `wsp mcp` (subcommand values override global ones):
 
 ```bash
 wsp --workspace ./.wsp --budget '{"max_preview_elements": 32}' mcp
+wsp mcp --workspace ./.wsp --budget '{"max_preview_elements": 32}'
+```
+
+`wsp mcp` validates the workspace before starting. If the workspace is
+missing or not initialized, the server fails fast with a structured
+`wsp.mcp/1.0` error envelope on stderr (exit code 1) instead of a traceback,
+so MCP clients can surface a diagnosable message rather than an opaque
+"Connection closed". Pass `--auto-init` to create and initialize a missing
+workspace at startup:
+
+```bash
+wsp mcp --workspace ./.wsp --auto-init
 ```
 
 ## Tool surface

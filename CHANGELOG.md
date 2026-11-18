@@ -30,6 +30,18 @@ not changelog entries until implemented.
 - `inspect_model` on a directory path now fails with an actionable
   `InputError` ("pass the `.safetensors` weights file inside it") instead of a
   misleading pickle-support message.
+- `wsp mcp` now accepts `--workspace/-w` and `--budget` directly on the
+  subcommand (overriding the global options), validates the workspace before
+  starting (structured error envelope on stderr instead of a raw traceback),
+  and gains `--auto-init` to create and initialize a missing workspace at
+  startup.
+- Workspace requirement notes and hints no longer assume a shell: MCP tool
+  descriptions and runtime error hints now point at starting `wsp mcp` with
+  an initialized workspace or restarting with `--auto-init`, and two hints
+  that referenced a nonexistent `wsp workspace init` command were corrected
+  to `wsp init`.
+- Capture skip warnings now include the observed tensor shape, making the
+  reported failure concrete.
 
 ## [0.5.0] — V1.5: event-driven investigation
 

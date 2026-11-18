@@ -101,7 +101,7 @@ def _result(
 def _require_workspace(service: Any) -> Any:
     if service.workspace is None:
         raise InputError(
-            "this operation requires a workspace; run 'wsp init' or pass --workspace",
+            "this operation requires an initialized workspace; create one with 'wsp init --path <dir>', or restart 'wsp mcp' with --auto-init",
             details={"hint": "the workspace stores intervention specifications and results"},
         )
     return service.workspace

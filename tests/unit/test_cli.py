@@ -24,6 +24,63 @@ def test_cli_mcp_command_lists_in_help() -> None:
     assert "MCP" in help_result.stdout
 
 
+def test_cli_mcp_help_lists_workspace_options() -> None:
+    runner = CliRunner()
+    help_result = runner.invoke(app, ["mcp", "--help"])
+    assert help_result.exit_code == 0
+    for option in ("--workspace", "--budget", "--auto-init"):
+        assert option in help_result.stdout, option
+
+
+def test_cli_mcp_broken_workspace_fails_with_clean_stderr_json(tmp_path: Path) -> None:
+    import subprocess
+    import sys
+
+    missing = tmp_path / "not-a-workspace"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; from wsp.cli.main import app; "
+            f"sys.argv = ['wsp', 'mcp', '--workspace', {str(missing)!r}]; app()",
+        ],
+        input=b"",
+        capture_output=True,
+        timeout=60,
+    )
+    # A broken workspace must produce a diagnosable stderr error, not a
+    # traceback that MCP clients only see as "Connection closed".
+    assert result.returncode == 1
+    stderr = result.stderr.decode(errors="replace")
+    payload = json.loads(stderr)
+    assert payload["schema_version"] == "wsp.mcp/1.0"
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "not_found"
+    assert "workspace" in payload["error"]["message"]
+    assert "Traceback" not in stderr
+
+
+def test_cli_mcp_auto_init_creates_workspace_then_exits(tmp_path: Path) -> None:
+    import subprocess
+    import sys
+
+    workspace = tmp_path / "fresh"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; from wsp.cli.main import app; "
+            f"sys.argv = ['wsp', 'mcp', '--workspace', {str(workspace)!r}, '--auto-init']; app()",
+        ],
+        input=b"",
+        capture_output=True,
+        timeout=60,
+    )
+    # EOF still shuts the server down cleanly, and the workspace was created.
+    assert result.returncode == 0, result.stderr.decode(errors="replace")
+    assert (workspace / "workspace.json").is_file()
+
+
 def test_cli_mcp_server_exits_cleanly_on_eof() -> None:
     import subprocess
     import sys

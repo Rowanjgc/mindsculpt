@@ -84,7 +84,7 @@ class Workspace:
         elif not self.config_path.exists():
             raise NotFoundError(
                 f"no workspace found at {self.root}",
-                details={"path": str(self.root), "hint": "run 'wsp workspace init'"},
+                details={"path": str(self.root), "hint": "run 'wsp init --path <dir>'"},
             )
         self.config = WorkspaceConfig.model_validate(read_json(self.config_path))
         # The artifact store is anchored at the workspace root so that

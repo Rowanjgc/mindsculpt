@@ -116,6 +116,14 @@ inspect_investigation_dossier {"dossier_artifact_id": "a_..."}
 If the recipe fails, read `inspect_recipe_run` and report the failing step. Do
 not silently retry with weaker validation.
 
+## 9. Where to find result data in envelopes
+
+Success envelopes nest some payloads more deeply than the top-level `data`
+object. The most common case: `record_trace` puts its summary under
+`data.summary.trace.artifact.metadata`, so the first probe into the envelope
+misses it. When a tool returns fewer fields than expected, probe one level
+deeper before assuming the data is absent.
+
 ## Current status
 
 A first evaluation — scripted, not autonomous — against a real hybrid

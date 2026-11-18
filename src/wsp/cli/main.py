@@ -170,7 +170,25 @@ def call_operation(
 
 
 @app.command("mcp")
-def mcp(ctx: typer.Context) -> None:
+def mcp(
+    ctx: typer.Context,
+    workspace: Path | None = typer.Option(
+        None,
+        "--workspace",
+        "-w",
+        help="Workspace directory (overrides the global --workspace option).",
+    ),
+    budget: str | None = typer.Option(
+        None,
+        "--budget",
+        help="Budget JSON object (overrides the global --budget option).",
+    ),
+    auto_init: bool = typer.Option(
+        False,
+        "--auto-init",
+        help="Create and initialize the workspace if it does not exist yet.",
+    ),
+) -> None:
     """Serve the tool registry over the MCP stdio transport (optional 'mcp' extra)."""
     try:
         from wsp.mcp.server import run_stdio
@@ -192,7 +210,30 @@ def mcp(ctx: typer.Context) -> None:
             },
             exit_code=1,
         )
-    service = ToolService(_workspace(ctx), budget=_budget(ctx))
+    options = dict(ctx.obj or {})
+    if workspace is not None:
+        options["workspace"] = workspace
+    if budget is not None:
+        options["budget"] = budget
+    ctx.obj = options
+    try:
+        service = ToolService(_workspace(ctx, create=auto_init), budget=_budget(ctx))
+    except WspError as exc:
+        # Fail with a diagnosable message instead of a traceback: MCP clients
+        # only see "Connection closed" when the server dies at startup.
+        typer.echo(
+            json.dumps(
+                {
+                    "schema_version": "wsp.mcp/1.0",
+                    "ok": False,
+                    "error": exc.to_dict(),
+                },
+                indent=2,
+                ensure_ascii=False,
+            ),
+            err=True,
+        )
+        raise typer.Exit(1) from exc
     run_stdio(service)
 
 

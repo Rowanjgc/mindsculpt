@@ -593,7 +593,7 @@ def run_recipe(
     if not has_workspace:
         raise InputError(
             "running an investigation recipe requires a workspace",
-            details={"hint": "run 'wsp init' or pass --workspace"},
+            details={"hint": "run 'wsp init --path <dir>' or restart 'wsp mcp' with --auto-init"},
         )
     if missing:
         raise InputError(

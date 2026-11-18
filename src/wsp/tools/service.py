@@ -604,7 +604,7 @@ class ToolService:
         if request.save_manifest:
             if self.workspace is None:
                 raise InputError(
-                    "save_manifest requires a workspace; run 'wsp workspace init' or construct Workspace(create=True)"
+                    "save_manifest requires a workspace; run 'wsp init --path <dir>' or construct Workspace(create=True)"
                 )
             path = self.workspace.save_manifest(manifest)
             data["saved_manifest_path"] = str(path)
@@ -862,7 +862,7 @@ class ToolService:
                 "large patch payloads require a workspace so they can be stored as artifacts",
                 details={
                     "elements": int(array.size),
-                    "hint": "run 'wsp workspace init' or set externalize_payloads=false with a smaller payload",
+                    "hint": "run 'wsp init --path <dir>' or set externalize_payloads=false with a smaller payload",
                 },
             )
         ref = self.workspace.artifacts.put_array(
