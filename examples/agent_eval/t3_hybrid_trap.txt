@@ -1,0 +1,1 @@
+Using the instrument, generate 8 new tokens for the prompt "The capital of France is" from the checkpoint at ~/.cache/huggingface/hub/models--Qwen--Qwen3.5-0.8B/snapshots/<revision>, using a staged/cached generation path if the instrument provides one. Report exactly what happened and any ids returned.

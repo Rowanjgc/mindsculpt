@@ -5,6 +5,10 @@ They use deterministic tiny models defined in the workbench itself (a `TinyMLP`
 for checkpoint mechanics and a small causal transformer for behavioral,
 replay, and intervention work).
 
+`agent_eval/` is the one deliberate exception: an autonomous LLM agent
+harness that drives the MCP server with a hosted model (network + API key
+required). See its [README](agent_eval/README.md).
+
 ## 1. Create the tiny checkpoint
 
 ```bash

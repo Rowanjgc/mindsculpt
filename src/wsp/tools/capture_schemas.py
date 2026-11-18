@@ -20,7 +20,16 @@ class ListCapturePointsInput(ToolInput):
 
     model: ReplayModelSource
     include_submodules: bool = True
-    kinds: list[str] | None = None
+    kinds: list[str] | None = Field(
+        default=None,
+        description=(
+            "Optional filter by canonical kind label (attention, "
+            "linear-attention, recurrent, norm, embedding, head, mlp, block, "
+            "aggregate, other); the response always carries kind_labels. "
+            "Unknown labels simply match nothing, and an empty match is "
+            "reported in notes."
+        ),
+    )
     limit: int = Field(default=200, gt=0, le=5000)
     instrumentation: _Instrumentation = "torch_hooks"
 

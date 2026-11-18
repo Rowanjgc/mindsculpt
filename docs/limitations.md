@@ -385,6 +385,8 @@ silently.
   research agent or a general workflow engine.
 - No LLM provider, cloud service, automatic checkpoint download, or automatic
   circuit interpretation is included.
-- Tool accessibility has had one scripted (not autonomous) evaluation through
-  the MCP transport on a real hybrid checkpoint; see `agent-evaluation.md`.
-  Evaluation with general-purpose language models has not happened yet.
+- Tool accessibility has had one scripted (not autonomous) evaluation and one
+  autonomous general-purpose-LLM evaluation (GLM-5.3, three tasks, one hybrid
+  checkpoint) through the MCP transport; see `agent-evaluation.md`.
+  Evaluation across multiple agent models, longer arcs, and other task
+  families has not happened yet.

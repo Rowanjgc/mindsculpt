@@ -130,6 +130,20 @@ Numbered for reference; each notes its disposition.
    install still reported the old version through MCP `serverInfo`. Process
    note: refresh the editable install (`uv pip install -e . --no-deps` or
    equivalent) after bumps. **Fixed (process).**
+8. **`list_capture_points` kind filter matches nothing silently.** Found in
+   the autonomous evaluation: guessed labels (`linear_attention`,
+   `gated_delta_net`, `ssm`) returned an empty point list with no
+   explanation — and the canonical label is in fact `linear-attention`
+   (hyphenated), which is listed nowhere. **Fixed**: canonical kind labels
+   are now exposed (`kind_labels` in every response and in the `kinds`
+   schema description), and an empty filtered result carries a note naming
+   the canonical labels; `include_submodules=false` (root-only listings)
+   says so when it produces nothing.
+9. **Hosted-model reasoning can exhaust a token cap.** Not a workbench
+   defect: the agent model sometimes emitted its entire budget as hidden
+   reasoning (`finish_reason=length`, empty content), which the harness now
+   retries once and leaves uncapped by default. Recorded here because a
+   future evaluation with other models will hit the same artifact.
 
 ## 4. Honest limits
 
@@ -161,3 +175,58 @@ WSP_REAL_MODEL=/path/to/local/checkpoint \
 
 A skipped run means unverified, not passing. See `mcp.md` for how to connect
 a real MCP client to the server.
+
+## 6. Autonomous LLM evaluation (second pass)
+
+After the scripted pass, the surface was handed to an actual
+general-purpose LLM agent: GLM-5.3 (hosted, temperature 0.1) driving the MCP
+stdio server through the harness in
+[`examples/agent_eval/`](../examples/agent_eval/). The system prompt is the
+server's own MCP instructions plus short envelope-semantics framing; the
+full 80-tool surface is exposed; nothing about WSP is hard-coded beyond
+that. Full JSON transcripts (every message, per-step usage and cost) were
+recorded; the findings below are taken from them.
+
+Tasks (one run each, one hybrid checkpoint
+Qwen3.5-0.8B, CPU):
+
+| Task | Steps | Errors | Outcome | Cost |
+| --- | --- | --- | --- | --- |
+| `t1_investigation` — full arc: identify the model, record a trace, detect `Paris` events, capture activations at the event, report artifact IDs and interpretation | 13 | 1 | **Success.** Complete report with verified replay (100% top-1 agreement, max log-prob diff ≈ 0.009), captured artifact IDs, and observations explicitly separated from interpretation | $0.49 |
+| `t2_directory_trap` — architecture + parameter count from the checkpoint *directory* | 4 | 1 | **Success.** Walked into the trap, recovered on the first retry using the weights filename listed by the error envelope, and delivered a full structural inventory (873,438,784 params: 752,393,024 language model + vision tower + MTP head) | $0.13 |
+| `t3_hybrid_trap` — generate 8 tokens via the staged/cached path on a hybrid architecture | 4 | 1 | **Success.** The `unsupported` rejection fired; the agent reported it accurately and explained that generation succeeded via the standard deterministic path | $0.13 |
+
+What this pass demonstrates that the scripted pass could not:
+
+- **Judgment-free entry.** The agent chose `discover_capabilities` first
+  with a well-formed query on its own — the progressive-disclosure design
+  works without being scripted.
+- **Error-driven recovery by judgment.** Every designed failure (directory
+  path, staged generation on a hybrid) was handled from the envelope alone:
+  the agent corrected its own payloads and reported rejections honestly
+  instead of claiming success. Finding 4's fix proved itself in practice:
+  the directory error now names the real weights file, and both agents
+  recovered on the first retry (previously seven failed guesses).
+- **Honest reporting.** The t1 report quoted the tool's own limitations
+  ("numerical observations from a teacher-forced replay ... not evidence of
+  a mechanism"), disclosed a tokenization caveat (chat-template re-encoding
+  made character offsets unavailable, token alignment stayed exact), and
+  answered the "unsupported operations" probe with "none" plus the one real
+  error it had made.
+- **Exploration depth.** 13 steps of unprompted structure exploration
+  (tensor paging, kind probes, module selection) with per-step cost
+  accounting (≈1.1M prompt tokens, 24k completion tokens total across the
+  arc).
+
+What remains open:
+
+- One agent model, one checkpoint, three tasks, no repeats: this measures
+  the surface against one LLM at one temperature, not agent-population
+  behavior.
+- The harness truncates envelopes to 12k characters and runs stdio only;
+  neither dimension was varied.
+- Finding 5 (deeply nested `record_trace` summary) was observed again by
+  the autonomous agent and remains open (minor).
+- The recipes (multi-step investigation programs) were not the entry path
+  in any autonomous run; evaluating recipe-guided behavior with LLM agents
+  is still untested.

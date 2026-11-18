@@ -66,6 +66,22 @@ def _classify(path: str, class_name: str) -> str:
     return "other"
 
 
+#: The canonical kind labels produced by :func:`_classify`.  Exposed through
+#: ``list_capture_points`` so callers never have to guess the taxonomy.
+CAPTURE_KIND_LABELS = (
+    "attention",
+    "linear-attention",
+    "recurrent",
+    "norm",
+    "embedding",
+    "head",
+    "mlp",
+    "block",
+    "aggregate",
+    "other",
+)
+
+
 def _parameter_count(module: Any) -> tuple[int, int]:
     parameters = list(module.parameters()) if hasattr(module, "parameters") else []
     return int(sum(int(p.numel()) for p in parameters)), len(parameters)
@@ -98,12 +114,14 @@ def discover_points(
 
     points: list[CapturePoint] = []
     truncated = False
+    seen_kinds: set[str] = set()
     for name, child in named:
         if not include_submodules and name:
             break
         path = name or "<root>"
         class_name = type(child).__name__
         kind = _classify(name, class_name)
+        seen_kinds.add(kind)
         if wanted is not None and kind not in wanted:
             continue
         parameter_count, tensor_count = _parameter_count(child)
@@ -145,6 +163,18 @@ def discover_points(
     ]
     if truncated:
         notes.append(f"listing truncated at {cap} points; raise limit to see more")
+    if wanted is not None and not points:
+        notes.append(
+            "no capture points matched kinds "
+            + ", ".join(sorted(wanted))
+            + "; canonical kind labels are "
+            + ", ".join(CAPTURE_KIND_LABELS)
+        )
+    if not include_submodules and not points:
+        notes.append(
+            "include_submodules=false lists only the model root; "
+            "set include_submodules=true to enumerate submodules"
+        )
 
     return CapturePointList(
         model_name=getattr(module, "name", None) or type(module).__name__,

@@ -9,6 +9,7 @@ from wsp.alignment.spans import resolve_span
 from wsp.behavior.trace import TraceStore
 from wsp.core.budget import Budget
 from wsp.core.errors import ArtifactError, InputError
+from wsp.investigation.points import CAPTURE_KIND_LABELS
 from wsp.core.models import ArtifactRef
 from wsp.investigation.capture import capture_checksum, position_targets, run_capture
 from wsp.investigation.models import SCHEMA_CAPTURE, TraceCaptureRecord
@@ -78,6 +79,14 @@ def list_capture_points(service: Any, request: ListCapturePointsInput, budget: B
             for point in data["points"]
             if not request.kinds or point["kind"] in set(request.kinds)
         ]
+        if request.kinds and not data["points"]:
+            data["notes"] = list(data.get("notes") or []) + [
+                "no capture points matched kinds "
+                + ", ".join(sorted(set(request.kinds)))
+                + "; canonical kind labels are "
+                + ", ".join(CAPTURE_KIND_LABELS)
+            ]
+        data["kind_labels"] = list(CAPTURE_KIND_LABELS)
         data["source"] = request.model.describe()
         data["instrumentation"] = capture_backend_capabilities()
         return _result(data)
@@ -91,6 +100,7 @@ def list_capture_points(service: Any, request: ListCapturePointsInput, budget: B
         budget=budget,
     )
     data = listing.model_dump(mode="json")
+    data["kind_labels"] = list(CAPTURE_KIND_LABELS)
     data["source"] = request.model.describe()
     data["instrumentation"] = {
         "backend": "torch_hooks",

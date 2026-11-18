@@ -24,12 +24,24 @@ not changelog entries until implemented.
 - First (scripted, non-autonomous) agent evaluation of the tool surface
   through MCP on a real hybrid checkpoint. See
   [`docs/agent-evaluation.md`](docs/agent-evaluation.md).
+- **Autonomous LLM agent evaluation** (GLM-5.3 via MCP stdio, three trap and
+  arc tasks on a real hybrid checkpoint, full JSON transcripts recorded) and
+  the reusable harness in `examples/agent_eval/`. All three tasks completed
+  with error-driven recovery; see
+  [`docs/agent-evaluation.md`](docs/agent-evaluation.md).
 
 ### Fixed
 
 - `inspect_model` on a directory path now fails with an actionable
   `InputError` ("pass the `.safetensors` weights file inside it") instead of a
   misleading pickle-support message.
+- The same directory error now enumerates the actual `.safetensors` weights
+  files it contains, so callers (including agents) never have to guess
+  checkpoint filenames.
+- `list_capture_points` exposes canonical kind labels (`kind_labels` in every
+  response and in the `kinds` schema description) and reports when a kind
+  filter matches nothing, naming the canonical labels; root-only
+  `include_submodules=false` listings say so when they produce no points.
 - `wsp mcp` now accepts `--workspace/-w` and `--budget` directly on the
   subcommand (overriding the global options), validates the workspace before
   starting (structured error envelope on stderr instead of a raw traceback),

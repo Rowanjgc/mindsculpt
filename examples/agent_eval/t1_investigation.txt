@@ -1,0 +1,9 @@
+You are studying a local Qwen3.5-0.8B checkpoint. The checkpoint directory is ~/.cache/huggingface/hub/models--Qwen--Qwen3.5-0.8B/snapshots/<revision>
+
+Do the following with the instrument tools, in whatever order you judge best:
+
+1. Establish what the model is (architecture, parameter count, tokenizer vocabulary size).
+2. Record a short generation trace: prompt "The capital of France is", a handful of new tokens, CPU device.
+3. Check the trace for behavioral events matching the text pattern "Paris".
+4. If such an event exists, capture activations at two attention modules around the event position.
+5. Report: parameter count, trace id, event id (if any), capture artifact id (if any), and a short paragraph interpreting whatever the instrument returned. If an operation is unsupported for this architecture, state that and explain why based on the error envelope.

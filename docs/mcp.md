@@ -40,7 +40,9 @@ configuration looks like this (any MCP client):
 
 A first scripted agent-style evaluation of this surface — what an agent can
 recover from descriptions, schemas, instructions, and envelopes alone — is
-recorded in [`agent-evaluation.md`](agent-evaluation.md).
+recorded in [`agent-evaluation.md`](agent-evaluation.md). An autonomous
+LLM-agent pass (GLM-5.3 driving the same server) and its harness are in
+[`examples/agent_eval/`](../examples/agent_eval/README.md).
 
 `--workspace` and `--budget` options pass through to the service layer as in
 every other command. They work both as global options before the subcommand

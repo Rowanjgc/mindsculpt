@@ -70,6 +70,24 @@ def test_list_capture_points_through_the_service(service: ToolService):
     assert data["schema_version"] == "wsp.capture-points/1.0"
     assert data["source"]["kind"] == "synthetic"
     assert any(point["path"] == "blocks.1" for point in data["points"])
+    assert "attention" in data["kind_labels"]
+
+
+def test_empty_kind_filter_reports_canonical_labels():
+    # Real friction from the autonomous agent trial: guessed kind labels
+    # ("linear_attention") matched nothing silently. An empty filter result
+    # must say so and name the canonical labels.
+    runtime = build_runtime()
+    listing = discover_points(runtime.model, kinds=["linear_attention"])
+    assert listing.points == []
+    joined = " ".join(listing.notes)
+    assert "no capture points matched kinds linear_attention" in joined
+    assert "canonical kind labels are" in joined
+    assert "linear-attention" in joined
+
+    root_only = discover_points(runtime.model, include_submodules=False, kinds=["attention"])
+    assert root_only.points == []
+    assert any("include_submodules=false lists only the model root" in note for note in root_only.notes)
 
 
 def test_summary_capture_measures_requested_positions(service: ToolService):
