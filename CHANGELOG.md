@@ -42,6 +42,9 @@ not changelog entries until implemented.
   to `wsp init`.
 - Capture skip warnings now include the observed tensor shape, making the
   reported failure concrete.
+- Directory-path checkpoint errors now enumerate the `.safetensors` files the
+  directory actually contains (message + `details.safetensors_files`), found
+  by an autonomous agent that kept guessing checkpoint filenames.
 
 ## [0.5.0] — V1.5: event-driven investigation
 

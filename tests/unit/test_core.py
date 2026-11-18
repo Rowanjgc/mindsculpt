@@ -191,6 +191,23 @@ def test_directory_checkpoint_path_gets_actionable_error(tmp_path: Path) -> None
     assert "model.safetensors" in str(info.value)
 
 
+def test_directory_checkpoint_error_enumerates_safetensors_files(tmp_path: Path) -> None:
+    # Real failure seen during the autonomous agent trial: the agent kept
+    # guessing checkpoint filenames because nothing enumerated the directory.
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    (snapshot / "model.safetensors-00001-of-00001.safetensors").write_bytes(b"x")
+    (snapshot / "unrelated.txt").write_text("not weights")
+    with pytest.raises(InputError) as info:
+        open_checkpoint(snapshot)
+    error = info.value.to_dict()
+    assert error["details"]["safetensors_files"] == [
+        "model.safetensors-00001-of-00001.safetensors"
+    ]
+    assert "model.safetensors-00001-of-00001.safetensors" in error["message"]
+    assert "unrelated.txt" not in error["message"]
+
+
 def test_float8_numeric_read_is_explicitly_unsupported(tmp_path: Path) -> None:
     from safetensors.numpy import save_file as save_numpy
 

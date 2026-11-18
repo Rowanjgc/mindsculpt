@@ -22,11 +22,16 @@ def open_checkpoint(
 ) -> CheckpointSource:
     candidate = Path(path).expanduser()
     if candidate.is_dir():
-        raise InputError(
+        found = sorted(item.name for item in candidate.glob("*.safetensors"))
+        details: dict[str, object] = {"path": str(candidate)}
+        message = (
             "checkpoint path is a directory; pass the .safetensors weights file "
-            "inside it (for example model.safetensors)",
-            details={"path": str(candidate)},
+            "inside it (for example model.safetensors)"
         )
+        if found:
+            details["safetensors_files"] = found
+            message += f"; this directory contains: {', '.join(found)}"
+        raise InputError(message, details=details)
     if candidate.suffix.lower() != ".safetensors":
         raise UnsupportedError(
             "only .safetensors checkpoints are opened automatically; "
